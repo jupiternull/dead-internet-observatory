@@ -1,0 +1,80 @@
+name: "⚙️ Pipeline + Index Update"
+
+on:
+  workflow_run:
+    workflows:
+      - "🤖 Reddit Minion"
+      - "📰 News Crawler Minion"
+      - "📖 Wikipedia Minion"
+      - "🌐 Common Crawl Minion"
+      - "🔶 HackerNews Minion"
+      - "🕰️ Wayback Machine Minion"
+    types: [completed]
+  schedule:
+    - cron: "0 6 * * *"       # Daily at 06:00 UTC — catches all overnight minions
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub
+
+      # ── Download bronze artifacts from all minion runs today ────────────────
+      # Each minion uploads its JSONL output as a GitHub Artifact.
+      # We pull them all down before running the pipeline.
+      - name: Download minion artifacts
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow_conclusion: success
+          name_is_regexp: true
+          name: "^(reddit|news|wikipedia|hn|wayback|commoncrawl)-bronze-"
+          path: data/bronze/
+          if_no_artifact_found: warn
+        continue-on-error: true
+
+      - name: Run Bronze → Silver pipeline
+        run: python3 -m pipeline.bronze_ingestion
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Run Silver → Gold + Index update
+        run: python3 -m pipeline.silver_processing
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      # ── Push Parquet datasets to Hugging Face ───────────────────────────────
+      - name: Push datasets to Hugging Face
+        if: ${{ env.HF_TOKEN != '' }}
+        run: |
+          python3 scripts/push_to_hf.py --repo jupiternull/dead-internet-observatory
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+      # ── Commit only the SQLite index back to the repo ───────────────────────
+      # Raw and processed data stays out of git — only the live index goes in.
+      - name: Commit observatory.db to repo
+        run: |
+          git config user.name  "Observatory Pipeline"
+          git config user.email "bot@dead-internet-observatory.noreply"
+          git add data/observatory.db || true
+          git diff --cached --quiet || git commit -m "chore(index): update $(date -u +%Y-%m-%d)"
+          git push || echo "Nothing to push"
+        continue-on-error: true

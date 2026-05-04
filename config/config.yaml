@@ -1,0 +1,124 @@
+project:
+  name: Dead Internet Observatory
+  version: 1.0.0
+  description: Tracking the synthetic takeover of the public internet
+
+storage:
+  backend: local          # 'local' or 's3'
+  local_path: ./data
+  s3_bucket: dead-internet-observatory
+  bronze_path: bronze
+  silver_path: silver
+  gold_path: gold
+  db_path: ./data/observatory.db   # SQLite for Streamlit
+
+sources:
+  common_crawl:
+    enabled: true
+    # Quarterly snapshots — use format CC-MAIN-YYYY-WW
+    crawl_dates:
+      - "2023-14"   # Q1 2023 baseline
+      - "2024-10"   # Q1 2024
+      - "2024-33"   # Q3 2024
+      - "2025-06"   # Q1 2025
+      - "2025-21"   # Q2 2025
+    max_segments_per_date: 3
+    wet_files_per_segment: 5
+    max_records_per_wet: 2000
+
+  reddit:
+    enabled: true
+    subreddits:
+      - worldnews
+      - technology
+      - science
+      - politics
+      - AskReddit
+      - todayilearned
+      - news
+      - gaming
+      - explainlikeimfive
+      - changemyview
+    posts_per_sub: 500
+    include_comments: true
+    max_comments_per_post: 50
+
+  news:
+    enabled: true
+    feeds:
+      - https://feeds.reuters.com/reuters/topNews
+      - https://rss.cnn.com/rss/edition.rss
+      - https://feeds.bbci.co.uk/news/rss.xml
+      - https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml
+      - https://feeds.washingtonpost.com/rss/world
+      - https://www.theguardian.com/world/rss
+      - https://feeds.npr.org/1001/rss.xml
+      - https://rss.politico.com/politics-news.xml
+    max_articles_per_feed: 200
+    request_timeout: 20
+
+  wikipedia:
+    enabled: true
+    sample_articles: 500
+    recent_changes_hours: 24
+    track_namespaces: [0]   # Main article namespace only
+
+  hackernews:
+    enabled: true
+    max_stories: 1000
+    include_comments: true
+    max_comments_per_story: 30
+    lookback_days: 7         # harvest stories from the last N days
+
+  wayback:
+    enabled: true
+    snapshot_years: [2019, 2021, 2023, 2024, 2025]
+    snapshots_per_year: 2    # CDX samples per sentinel URL per year
+    sentinel_urls:
+      # News front pages
+      - https://www.reuters.com/
+      - https://www.bbc.com/news
+      - https://www.theguardian.com/international
+      - https://apnews.com/
+      # Tech / HN
+      - https://news.ycombinator.com/
+      - https://techcrunch.com/
+      # Reddit (old.reddit renders better in Wayback)
+      - https://old.reddit.com/r/worldnews/
+      - https://old.reddit.com/r/technology/
+      - https://old.reddit.com/r/science/
+      # Reference
+      - https://en.wikipedia.org/wiki/Artificial_intelligence
+      - https://en.wikipedia.org/wiki/Main_Page
+      # Forums / blogs
+      - https://news.ycombinator.com/
+      - https://lobste.rs/
+      - https://marginalrevolution.com/
+
+detection:
+  min_text_length: 80
+  max_text_length_for_features: 5000
+  # Component weights must sum to 1.0
+  weights:
+    ttr: 0.18
+    mtld: 0.12
+    entropy: 0.15
+    sentence_variance: 0.15
+    repetition: 0.15
+    burstiness: 0.15
+    zipf_deviation: 0.10
+
+analytics:
+  index_smoothing_window: 7        # days for rolling average
+  anomaly_zscore_threshold: 2.5
+  trend_min_data_points: 14
+  historical_baseline_year: 2019   # "pre-AI" baseline reference
+
+app:
+  demo_mode: true        # generate synthetic data if no real data found
+  cache_ttl_seconds: 3600
+  refresh_hint_seconds: 300
+  # Historical starting score (estimated pre-ChatGPT era)
+  baseline_aliveness: 78.0
+  # Current estimated score
+  current_aliveness: 41.3

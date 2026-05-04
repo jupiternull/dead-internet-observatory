@@ -1,0 +1,43 @@
+name: "🤖 Reddit Minion"
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      posts_per_sub:
+        description: "Posts to harvest per subreddit"
+        required: false
+        default: "500"
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests pyyaml tqdm
+
+      - name: Run Reddit Minion
+        run: python3 -m minions.reddit_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload bronze data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reddit-bronze-${{ github.run_id }}
+          path: data/bronze/reddit/
+          retention-days: 7       # pipeline picks these up within hours
+          if-no-files-found: warn
