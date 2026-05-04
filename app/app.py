@@ -211,7 +211,6 @@ PLOTLY_BASE = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
     font=dict(family="Rajdhani, sans-serif", color="#e0e0e0"),
-    margin=dict(l=40, r=20, t=40, b=40),
 )
 
 COLOR_GREEN  = "#00ff88"
