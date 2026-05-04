@@ -1,12 +1,12 @@
 # ☠ Dead Internet Observatory
 
-**Tracking and quantifying the synthetic takeover of the public internet, in real time.**
+**Tracking and quantifying the synthetic takeover of the public internet**
 
-The [Dead Internet Theory](https://en.wikipedia.org/wiki/Dead_Internet_theory) says the internet is increasingly populated by bots, AI-generated content, and automated engagement farms rather than real humans. Whether you think it's a conspiracy theory or an obvious reality, one thing is clear: nobody's actually measuring it. This project does.
+The [Dead Internet Theory](https://en.wikipedia.org/wiki/Dead_Internet_theory) says the internet is increasingly populated by bots, AI-generated content, and automated engagement farms rather than real humans.
 
-We built a living observatory that computes an **Internet Aliveness Index (IAI)** -- a 0-100 score measuring how much of the sampled public internet still looks authentically human. We pull from six data sources, run a battery of statistical detection signals on every document, aggregate everything into a daily index, and serve it through a research-grade Streamlit dashboard.
+This project is a living observatory that computes an **Internet Aliveness Index (IAI)** -- a 0-100 score measuring how much of the sampled public internet still looks authentically human. Pulling from six data sources, run a battery of statistical detection signals on every document, aggregate everything into a daily index, and serve it through a research-grade Streamlit dashboard.
 
-No LLMs. No paid APIs. No subscriptions. 100% open source, 100% free to run.
+No LLMs, no paid APIs, no subscriptions. 100% open source and free to run.
 
 ---
 
