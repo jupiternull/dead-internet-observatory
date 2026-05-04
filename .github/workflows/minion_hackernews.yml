@@ -1,0 +1,43 @@
+name: "🔶 HackerNews Minion"
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "Days of HN history to harvest"
+        required: false
+        default: "7"
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests pyyaml beautifulsoup4 lxml tqdm
+
+      - name: Run HackerNews Minion
+        run: python3 -m minions.hackernews_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload bronze data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hn-bronze-${{ github.run_id }}
+          path: data/bronze/hackernews/
+          retention-days: 7
+          if-no-files-found: warn

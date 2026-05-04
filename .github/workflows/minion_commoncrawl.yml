@@ -1,0 +1,69 @@
+name: "🌐 Common Crawl Minion"
+
+on:
+  schedule:
+    - cron: "0 1 * * 0"      # Weekly on Sunday at 01:00 UTC (CC files are large)
+  workflow_dispatch:
+    inputs:
+      crawl_date:
+        description: "CC crawl date (e.g. 2025-06)"
+        required: false
+        default: ""
+      max_segments:
+        description: "Max segments to sample"
+        required: false
+        default: "3"
+
+permissions:
+  contents: write
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240          # CC files are large; allow 4 hours
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests pyyaml tqdm
+
+      - name: Patch config for this run
+        if: ${{ github.event.inputs.crawl_date != '' }}
+        run: |
+          python - <<'EOF'
+          import yaml, sys
+          with open("config/config.yaml") as f: cfg = yaml.safe_load(f)
+          date = "${{ github.event.inputs.crawl_date }}"
+          if date:
+              cfg["sources"]["common_crawl"]["crawl_dates"] = [date]
+          max_seg = int("${{ github.event.inputs.max_segments }}" or 3)
+          cfg["sources"]["common_crawl"]["max_segments_per_date"] = max_seg
+          with open("config/config.yaml", "w") as f: yaml.dump(cfg, f)
+          EOF
+
+      - name: Run Common Crawl Minion
+        run: python -m minions.common_crawl_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: commoncrawl-bronze-${{ github.run_id }}
+          path: data/bronze/common_crawl/
+          retention-days: 90
+
+      - name: Commit data
+        run: |
+          git config user.name  "Common Crawl Bot"
+          git config user.email "bot@dead-internet-observatory.noreply"
+          git add data/bronze/common_crawl/ || true
+          git diff --cached --quiet || git commit -m "chore(data): CC harvest $(date -u +%Y-%m-%d)"
+          git push || echo "Push skipped"
+        continue-on-error: true

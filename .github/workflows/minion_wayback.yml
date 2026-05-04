@@ -1,0 +1,56 @@
+name: "🕰️ Wayback Machine Minion"
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "Comma-separated snapshot years (e.g. 2019,2023,2025)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests pyyaml beautifulsoup4 lxml tqdm
+
+      - name: Patch snapshot years if overridden
+        if: ${{ github.event.inputs.years != '' }}
+        run: |
+          python3 - <<'EOF'
+          import yaml
+          with open("config/config.yaml") as f: cfg = yaml.safe_load(f)
+          years_str = "${{ github.event.inputs.years }}"
+          if years_str:
+              years = [int(y.strip()) for y in years_str.split(",") if y.strip()]
+              cfg["sources"]["wayback"]["snapshot_years"] = years
+          with open("config/config.yaml", "w") as f: yaml.dump(cfg, f)
+          EOF
+
+      - name: Run Wayback Minion
+        run: python3 -m minions.wayback_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload bronze data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayback-bronze-${{ github.run_id }}
+          path: data/bronze/wayback/
+          retention-days: 7
+          if-no-files-found: warn
