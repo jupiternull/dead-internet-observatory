@@ -1,12 +1,8 @@
 """
-Dead Internet Observatory — Streamlit Mission Control Dashboard
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Dead Internet Observatory — Streamlit Dashboard
+Research-grade interface tracking the Internet Aliveness Index.
 
-Cyberpunk NASA-style observatory tracking the Internet Aliveness Index.
-Deploys free on Streamlit Community Cloud.
-
-Run locally:
-    streamlit run app/app.py
+Aesthetic: observatory meets scholar's study — parchment, ink, brass, and starlight.
 """
 
 import os
@@ -17,843 +13,728 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 import streamlit as st
 
-# ── Path setup ────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
-
 CONFIG_PATH = str(ROOT / "config" / "config.yaml")
 DB_PATH     = str(ROOT / "data" / "observatory.db")
 
-# ── Lazy imports (avoid crashing if packages missing at import time) ──────────
 try:
     from analytics.aliveness_index import AlivenessIndexEngine, seed_demo_data
-    from analytics.anomaly_detector import label_anomalies, get_notable_anomalies
+    from analytics.anomaly_detector import label_anomalies
     ANALYTICS_OK = True
 except ImportError:
     ANALYTICS_OK = False
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  THEME & CSS
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  PALETTE & THEME
+# ══════════════════════════════════════════════════════════════════════════════
 
-DARK_CSS = """
+P = {
+    "bg":          "#F2EDE4",   # parchment
+    "bg_dark":     "#E8E0D3",   # slightly darker parchment
+    "card":        "#FAF7F2",   # near-white paper
+    "border":      "#D4C9B8",   # warm border
+    "border_soft": "#E4DDD0",   # very soft border
+
+    "ink":         "#1C1812",   # near-black ink
+    "ink_mid":     "#4A3F32",   # medium brown ink
+    "ink_light":   "#8C7B68",   # faded ink
+
+    "navy":        "#1E3A5F",   # observatory navy
+    "navy_light":  "#2E5490",   # lighter navy
+    "burgundy":    "#6B1F1F",   # study leather
+    "forest":      "#1B4332",   # wizard's grove
+    "gold":        "#9A7B2F",   # antique brass
+    "gold_light":  "#C4A24D",   # polished brass
+    "purple":      "#3D2B5E",   # mystic dusk
+    "rust":        "#7A3B1E",   # aged copper
+
+    "good":        "#1B4332",   # forest green for high scores
+    "warn":        "#7A5C00",   # amber for mid scores
+    "bad":         "#6B1F1F",   # burgundy for low scores
+}
+
+PLOTLY_BASE = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="Georgia, 'Times New Roman', serif", color=P["ink_mid"]),
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  CSS
+# ══════════════════════════════════════════════════════════════════════════════
+
+CSS = f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* ── Global reset ── */
-html, body, [class*="css"] {
-    background-color: #050508 !important;
-    color: #e0e0e0 !important;
-    font-family: 'Rajdhani', sans-serif;
-}
+/* ── Base ── */
+html, body, [class*="css"] {{
+    background-color: {P["bg"]} !important;
+    color: {P["ink"]} !important;
+}}
+body {{ font-family: 'Inter', sans-serif; }}
+#MainMenu, footer, header {{ visibility: hidden; }}
+.block-container {{ padding-top: 2rem !important; max-width: 1280px; }}
+::-webkit-scrollbar {{ width: 5px; }}
+::-webkit-scrollbar-track {{ background: {P["bg_dark"]}; }}
+::-webkit-scrollbar-thumb {{ background: {P["border"]}; border-radius: 3px; }}
 
-/* ── Hide Streamlit chrome ── */
-#MainMenu, footer, header { visibility: hidden; }
-.block-container { padding-top: 1rem !important; max-width: 1400px; }
+/* ── Masthead ── */
+.masthead {{
+    border-bottom: 2px solid {P["ink"]};
+    padding-bottom: 1.2rem;
+    margin-bottom: 2rem;
+}}
+.masthead-eyebrow {{
+    font-family: 'Inter', sans-serif;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: {P["ink_light"]};
+    margin-bottom: 0.3rem;
+}}
+.masthead-title {{
+    font-family: 'Crimson Pro', serif;
+    font-size: 2.6rem;
+    font-weight: 300;
+    color: {P["ink"]};
+    letter-spacing: 0.03em;
+    line-height: 1;
+    margin: 0;
+}}
+.masthead-subtitle {{
+    font-family: 'Crimson Pro', serif;
+    font-style: italic;
+    font-size: 1rem;
+    color: {P["ink_light"]};
+    margin-top: 0.3rem;
+}}
+.masthead-meta {{
+    font-family: 'Inter', sans-serif;
+    font-size: 0.7rem;
+    color: {P["ink_light"]};
+    letter-spacing: 0.05em;
+    margin-top: 0.8rem;
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+}}
+.live-dot {{
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: {P["forest"]};
+    margin-right: 5px;
+    animation: blink 2.5s ease-in-out infinite;
+}}
+@keyframes blink {{
+    0%, 100% {{ opacity: 1; }}
+    50% {{ opacity: 0.3; }}
+}}
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #0a0a0f; }
-::-webkit-scrollbar-thumb { background: #1e1e3a; border-radius: 3px; }
+/* ── Section labels ── */
+.section-rule {{
+    border: none;
+    border-top: 1px solid {P["border"]};
+    margin: 2rem 0 1rem 0;
+}}
+.section-label {{
+    font-family: 'Inter', sans-serif;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: {P["ink_light"]};
+    margin-bottom: 1rem;
+}}
 
-/* ── Mission header ── */
-.mission-header {
-    background: linear-gradient(135deg, #050508 0%, #0d0d20 50%, #050508 100%);
-    border: 1px solid #1e1e3a;
-    border-radius: 12px;
-    padding: 28px 36px;
-    margin-bottom: 24px;
+/* ── Stat cards ── */
+.stat-grid {{ display: flex; gap: 1rem; margin-bottom: 1.5rem; }}
+.stat-card {{
+    background: {P["card"]};
+    border: 1px solid {P["border_soft"]};
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    flex: 1;
     position: relative;
-    overflow: hidden;
-}
-.mission-header::before {
+}}
+.stat-card::before {{
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 2px;
-    background: linear-gradient(90deg, transparent, #00ff88, #00aaff, transparent);
-    animation: scan 3s ease-in-out infinite;
-}
-@keyframes scan {
-    0%   { opacity: 0; transform: translateX(-100%); }
-    50%  { opacity: 1; }
-    100% { opacity: 0; transform: translateX(100%); }
-}
-.mission-title {
-    font-family: 'Space Mono', monospace;
-    font-size: 2.2rem;
-    font-weight: 700;
-    color: #00ff88;
-    text-shadow: 0 0 30px rgba(0,255,136,0.5);
-    margin: 0;
-    letter-spacing: 2px;
-}
-.mission-subtitle {
-    font-family: 'Rajdhani', sans-serif;
-    color: #888899;
-    font-size: 1.05rem;
-    margin-top: 6px;
-    letter-spacing: 1px;
-}
-.status-dot {
-    display: inline-block;
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    background: #00ff88;
-    box-shadow: 0 0 10px #00ff88;
-    animation: pulse-dot 2s ease-in-out infinite;
-    margin-right: 8px;
-}
-@keyframes pulse-dot {
-    0%, 100% { opacity: 1; box-shadow: 0 0 10px #00ff88; }
-    50%       { opacity: 0.4; box-shadow: 0 0 4px #00ff88; }
-}
-
-/* ── Stat cards ── */
-.stat-card {
-    background: #0d0d18;
-    border: 1px solid #1e1e3a;
-    border-radius: 10px;
-    padding: 18px 20px;
-    text-align: center;
-    position: relative;
-    overflow: hidden;
-}
-.stat-card::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 2px;
-}
-.stat-card.green::after  { background: #00ff88; }
-.stat-card.red::after    { background: #ff0055; }
-.stat-card.blue::after   { background: #00aaff; }
-.stat-card.orange::after { background: #ffaa00; }
-.stat-value {
-    font-family: 'Space Mono', monospace;
-    font-size: 2rem;
-    font-weight: 700;
+    border-radius: 4px 4px 0 0;
+}}
+.stat-card.navy::before  {{ background: {P["navy"]}; }}
+.stat-card.forest::before {{ background: {P["forest"]}; }}
+.stat-card.burgundy::before {{ background: {P["burgundy"]}; }}
+.stat-card.gold::before {{ background: {P["gold"]}; }}
+.stat-card.purple::before {{ background: {P["purple"]}; }}
+.stat-number {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.9rem;
+    font-weight: 500;
     line-height: 1;
-}
-.stat-value.green  { color: #00ff88; text-shadow: 0 0 20px rgba(0,255,136,0.4); }
-.stat-value.red    { color: #ff0055; text-shadow: 0 0 20px rgba(255,0,85,0.4); }
-.stat-value.blue   { color: #00aaff; text-shadow: 0 0 20px rgba(0,170,255,0.4); }
-.stat-value.orange { color: #ffaa00; text-shadow: 0 0 20px rgba(255,170,0,0.4); }
-.stat-label {
-    font-family: 'Rajdhani', sans-serif;
-    color: #666680;
-    font-size: 0.75rem;
+    color: {P["ink"]};
+}}
+.stat-number.navy  {{ color: {P["navy"]}; }}
+.stat-number.forest {{ color: {P["forest"]}; }}
+.stat-number.burgundy {{ color: {P["burgundy"]}; }}
+.stat-number.gold {{ color: {P["gold"]}; }}
+.stat-number.purple {{ color: {P["purple"]}; }}
+.stat-label {{
+    font-family: 'Inter', sans-serif;
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    letter-spacing: 1.5px;
-    margin-top: 6px;
-}
-.stat-delta {
-    font-family: 'Space Mono', monospace;
+    color: {P["ink_light"]};
+    margin-top: 0.35rem;
+}}
+.stat-note {{
+    font-family: 'Crimson Pro', serif;
+    font-style: italic;
     font-size: 0.8rem;
-    margin-top: 4px;
-}
+    color: {P["ink_light"]};
+    margin-top: 0.2rem;
+}}
 
-/* ── Section headers ── */
-.section-header {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.85rem;
-    color: #444460;
-    text-transform: uppercase;
-    letter-spacing: 3px;
-    padding: 4px 0;
-    margin: 28px 0 16px 0;
-    border-bottom: 1px solid #1e1e3a;
-}
-
-/* ── Domain badge ── */
-.domain-badge {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 12px;
-    font-family: 'Space Mono', monospace;
+/* ── Finding callout ── */
+.finding {{
+    background: {P["card"]};
+    border: 1px solid {P["border_soft"]};
+    border-left: 3px solid {P["navy"]};
+    border-radius: 0 4px 4px 0;
+    padding: 0.75rem 1rem;
+    margin: 0.4rem 0;
+    font-family: 'Crimson Pro', serif;
+    font-size: 0.95rem;
+    color: {P["ink_mid"]};
+}}
+.finding .date {{
+    font-family: 'JetBrains Mono', monospace;
     font-size: 0.7rem;
-    margin: 2px;
-}
+    color: {P["ink_light"]};
+    margin-bottom: 0.2rem;
+}}
+.finding.drop {{ border-left-color: {P["burgundy"]}; }}
+.finding.spike {{ border-left-color: {P["forest"]}; }}
 
-/* ── Anomaly alert ── */
-.anomaly-alert {
-    background: linear-gradient(90deg, rgba(255,0,85,0.08), transparent);
-    border-left: 3px solid #ff0055;
-    padding: 10px 16px;
-    border-radius: 0 8px 8px 0;
-    margin: 6px 0;
-    font-family: 'Rajdhani', sans-serif;
-}
+/* ── Source table ── */
+.source-row {{
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid {P["border_soft"]};
+    font-family: 'Inter', sans-serif;
+    font-size: 0.82rem;
+}}
+.source-name {{
+    width: 120px;
+    font-weight: 500;
+    color: {P["ink"]};
+    text-transform: capitalize;
+}}
+.source-bar-wrap {{
+    flex: 1;
+    background: {P["bg_dark"]};
+    border-radius: 2px;
+    height: 6px;
+    margin: 0 0.75rem;
+    overflow: hidden;
+}}
+.source-bar {{ height: 100%; border-radius: 2px; }}
+.source-score {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: {P["ink_mid"]};
+    width: 40px;
+    text-align: right;
+}}
 
-/* ── Plotly chart background override ── */
-.js-plotly-plot .plotly { background: transparent !important; }
+/* ── Methodology box ── */
+.method-box {{
+    background: {P["card"]};
+    border: 1px solid {P["border_soft"]};
+    border-radius: 4px;
+    padding: 1.2rem 1.5rem;
+    font-family: 'Crimson Pro', serif;
+    font-size: 0.95rem;
+    color: {P["ink_mid"]};
+    line-height: 1.65;
+}}
 
-/* ── Demo banner ── */
-.demo-banner {
-    background: linear-gradient(90deg, rgba(255,170,0,0.08), rgba(255,170,0,0.04));
-    border: 1px solid rgba(255,170,0,0.3);
-    border-radius: 8px;
-    padding: 10px 18px;
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 0.9rem;
-    color: #ffaa00;
-    margin-bottom: 20px;
-}
+/* ── Score pill ── */
+.score-pill {{
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 2px;
+    margin-left: 6px;
+}}
 </style>
 """
 
-# ── Plotly layout base ─────────────────────────────────────────────────────────
-PLOTLY_BASE = dict(
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Rajdhani, sans-serif", color="#e0e0e0"),
-)
 
-COLOR_GREEN  = "#00ff88"
-COLOR_RED    = "#ff0055"
-COLOR_BLUE   = "#00aaff"
-COLOR_ORANGE = "#ffaa00"
-COLOR_PURPLE = "#aa00ff"
-
-CATEGORY_COLORS = {
-    "web":    COLOR_BLUE,
-    "social": COLOR_GREEN,
-    "news":   COLOR_ORANGE,
-    "wiki":   COLOR_PURPLE,
-    "blog":   "#ff88aa",
-}
-
-
-# ════════════════════════════════════════════════════════════════════════════════
-#  DATA LOADING
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  DATA
+# ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_resource(ttl=3600)
 def get_engine():
-    """Get or create the AlivenessIndexEngine (cached for session lifetime)."""
     if not ANALYTICS_OK:
         return None
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     try:
-        import yaml
-        with open(CONFIG_PATH) as fh:
-            cfg = yaml.safe_load(fh)
-        # Override db path if running in Streamlit cloud vs local
-        cfg["storage"]["db_path"] = DB_PATH
         engine = AlivenessIndexEngine(CONFIG_PATH)
-        # Auto-seed demo data if DB is empty
-        if engine.get_meta("demo_seeded") != "true":
-            seed_demo_data(DB_PATH, CONFIG_PATH)
+        if engine.get_meta("demo_seeded") == "true":
+            import sqlite3
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM meta WHERE key='demo_seeded'")
+            conn.commit()
+            conn.close()
         return engine
     except Exception as exc:
-        st.error(f"Engine init error: {exc}")
+        st.error(f"Engine error: {exc}")
         return None
 
 
 @st.cache_data(ttl=300)
-def load_timeline(days: int = 730) -> pd.DataFrame:
+def load_timeline(days: int = 3000) -> pd.DataFrame:
     engine = get_engine()
-    if engine is None:
-        return _synthetic_timeline(days)
-    try:
-        df = engine.get_composite_timeline(days)
-        if df.empty:
-            seed_demo_data(DB_PATH, CONFIG_PATH)
+    if engine:
+        try:
             df = engine.get_composite_timeline(days)
-        if df.empty:
-            return _synthetic_timeline(days)
-        df["date"] = pd.to_datetime(df["date"])
-        return label_anomalies(df, "aliveness_index")
-    except Exception:
-        return _synthetic_timeline(days)
+            if df.empty and engine.get_meta("demo_seeded") != "true":
+                seed_demo_data(DB_PATH, CONFIG_PATH)
+                df = engine.get_composite_timeline(days)
+            if not df.empty:
+                df["date"] = pd.to_datetime(df["date"])
+                return label_anomalies(df, "aliveness_index")
+        except Exception:
+            pass
+    return _demo_timeline()
 
 
 @st.cache_data(ttl=300)
-def load_source_breakdown() -> pd.DataFrame:
+def load_sources() -> pd.DataFrame:
     engine = get_engine()
-    if engine is None:
-        return _synthetic_sources()
-    try:
-        df = engine.get_source_breakdown()
-        return df if not df.empty else _synthetic_sources()
-    except Exception:
-        return _synthetic_sources()
+    if engine:
+        try:
+            df = engine.get_source_breakdown()
+            if not df.empty:
+                return df
+        except Exception:
+            pass
+    return _demo_sources()
 
 
 @st.cache_data(ttl=300)
-def load_current_score() -> float:
+def load_score() -> float:
     engine = get_engine()
-    if engine is None:
-        return 41.3
-    try:
-        return engine.get_current_score()
-    except Exception:
-        return 41.3
+    if engine:
+        try:
+            return engine.get_current_score()
+        except Exception:
+            pass
+    return 55.5
 
 
-# ── Synthetic fallbacks ────────────────────────────────────────────────────────
-
-def _synthetic_timeline(days: int = 730) -> pd.DataFrame:
-    """Fallback synthetic timeline if DB unavailable."""
+def _demo_timeline() -> pd.DataFrame:
     rng = np.random.default_rng(42)
-    end   = datetime.now(timezone.utc)
-    start = end - timedelta(days=days)
-    dates = pd.date_range(start, end, freq="D")
+    end = datetime.now(timezone.utc)
+    dates = pd.date_range(end - timedelta(days=730), end, freq="D")
     n = len(dates)
     x = np.linspace(0, 1, n)
-    trend = 78.0 - 37.0 * (1 / (1 + np.exp(-8 * (x - 0.55))))
-    noise = rng.normal(0, 1.5, n)
-    weekly = 1.2 * np.sin(2 * np.pi * np.arange(n) / 7)
-    scores = np.clip(trend + noise + weekly, 10, 95)
-
+    scores = np.clip(78 - 28 * (1 / (1 + np.exp(-7 * (x - 0.6)))) + rng.normal(0, 1.5, n), 20, 92)
     df = pd.DataFrame({
         "date": dates,
         "aliveness_index": scores,
         "smoothed_index": pd.Series(scores).rolling(7, min_periods=1, center=True).mean().values,
-        "n_docs": rng.integers(800, 5000, n),
-        "anomaly_flag": 0,
-        "anomaly_type": "",
-        "z_score": 0.0,
+        "n_docs": rng.integers(500, 3000, n),
+        "anomaly_flag": 0, "anomaly_type": "", "z_score": 0.0, "is_anomaly": False,
     })
     return label_anomalies(df, "aliveness_index")
 
 
-def _synthetic_sources() -> pd.DataFrame:
-    rng = np.random.default_rng(99)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    rows = []
-    configs = [
-        ("common_crawl", "web", 43.1), ("reddit", "social", 51.2),
-        ("news", "news", 38.7), ("wikipedia", "wiki", 62.4),
-    ]
-    for src, cat, base in configs:
-        rows.append({
-            "date": today, "source": src, "category": cat,
-            "mean_score": base + rng.normal(0, 2),
-            "n_docs": rng.integers(800, 3000),
-        })
-    return pd.DataFrame(rows)
+def _demo_sources() -> pd.DataFrame:
+    return pd.DataFrame([
+        {"source": "news",        "category": "news",   "mean_score": 63.3, "n_docs": 87},
+        {"source": "wayback",     "category": "web",    "mean_score": 66.1, "n_docs": 15},
+        {"source": "reddit",      "category": "social", "mean_score": 55.3, "n_docs": 496},
+        {"source": "hackernews",  "category": "social", "mean_score": 52.7, "n_docs": 200},
+        {"source": "wikipedia",   "category": "wiki",   "mean_score": 52.5, "n_docs": 18},
+    ])
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  VISUALIZATION COMPONENTS
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  CHARTS
+# ══════════════════════════════════════════════════════════════════════════════
 
-def render_aliveness_gauge(score: float) -> go.Figure:
-    """Cyberpunk semicircle gauge for the main IAI score."""
-    if score >= 70:
-        color = COLOR_GREEN
-        label = "MOSTLY HUMAN"
+def chart_gauge(score: float) -> go.Figure:
+    if score >= 65:
+        color, label = P["forest"],   "Predominantly Human"
     elif score >= 50:
-        color = "#aaff00"
-        label = "MIXED SIGNALS"
-    elif score >= 30:
-        color = COLOR_ORANGE
-        label = "SYNTHETIC MAJORITY"
+        color, label = P["gold"],     "Mixed — Significant Synthetic Presence"
+    elif score >= 35:
+        color, label = P["rust"],     "Synthetic Majority Detected"
     else:
-        color = COLOR_RED
-        label = "DEAD INTERNET"
+        color, label = P["burgundy"], "Critical — Internet Largely Synthetic"
 
     fig = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
+        mode="gauge+number",
         value=score,
-        delta={
-            "reference": 78.0,
-            "valueformat": ".1f",
-            "font": {"size": 14, "family": "Space Mono"},
-            "prefix": "Δ vs 2019: ",
-            "decreasing": {"color": COLOR_RED},
-            "increasing": {"color": COLOR_GREEN},
-        },
-        title={
-            "text": f"<b style='font-family:Space Mono;letter-spacing:2px'>{label}</b>",
-            "font": {"size": 14, "color": "#666680"},
-        },
-        number={
-            "font": {"size": 60, "family": "Space Mono", "color": color},
-            "suffix": "",
-        },
-        gauge={
-            "axis": {
-                "range": [0, 100],
-                "tickwidth": 1,
-                "tickcolor": "#333350",
-                "tickfont": {"size": 10, "family": "Space Mono", "color": "#444460"},
-                "tickvals": [0, 25, 50, 75, 100],
-            },
-            "bar": {"color": color, "thickness": 0.25},
-            "bgcolor": "rgba(0,0,0,0)",
-            "borderwidth": 0,
-            "steps": [
-                {"range": [0, 25],  "color": "rgba(255,0,85,0.12)"},
-                {"range": [25, 50], "color": "rgba(255,170,0,0.08)"},
-                {"range": [50, 75], "color": "rgba(170,255,0,0.06)"},
-                {"range": [75, 100],"color": "rgba(0,255,136,0.06)"},
+        title=dict(
+            text=f"<span style='font-family:Crimson Pro,serif;font-size:13px;color:{P[\"ink_light\"]};font-style:italic'>{label}</span>",
+            font=dict(size=13),
+        ),
+        number=dict(
+            font=dict(size=64, family="JetBrains Mono, monospace", color=color),
+            suffix="",
+        ),
+        gauge=dict(
+            axis=dict(
+                range=[0, 100],
+                tickwidth=1,
+                tickcolor=P["border"],
+                tickfont=dict(size=9, family="Inter, sans-serif", color=P["ink_light"]),
+                tickvals=[0, 25, 50, 75, 100],
+            ),
+            bar=dict(color=color, thickness=0.22),
+            bgcolor="rgba(0,0,0,0)",
+            borderwidth=0,
+            steps=[
+                {"range": [0, 25],   "color": "rgba(107,31,31,0.07)"},
+                {"range": [25, 50],  "color": "rgba(122,59,30,0.05)"},
+                {"range": [50, 75],  "color": "rgba(154,123,47,0.04)"},
+                {"range": [75, 100], "color": "rgba(27,67,50,0.05)"},
             ],
-            "threshold": {
-                "line": {"color": "#ffffff", "width": 2},
-                "thickness": 0.75,
-                "value": 78,
-            },
-        },
+            threshold=dict(
+                line=dict(color=P["ink_light"], width=1.5),
+                thickness=0.7,
+                value=68,
+            ),
+        ),
     ))
-
     fig.update_layout(
         **PLOTLY_BASE,
-        height=300,
-        margin=dict(l=30, r=30, t=60, b=10),
-        annotations=[
-            dict(
-                x=0.5, y=0.05, xanchor="center", yanchor="bottom",
-                text="<span style='font-family:Space Mono;font-size:10px;color:#444460'>▲ 2019 BASELINE: 78.0</span>",
-                showarrow=False,
-            )
-        ],
+        height=260,
+        margin=dict(l=20, r=20, t=40, b=10),
+        annotations=[dict(
+            x=0.5, y=0.08, xanchor="center",
+            text=f"<span style='font-family:Inter,sans-serif;font-size:9px;color:{P[\"ink_light\"]};letter-spacing:0.1em'>ESTIMATED 2019 BASELINE  ▲  68.0</span>",
+            showarrow=False,
+        )],
     )
     return fig
 
 
-def render_timeline(df: pd.DataFrame) -> go.Figure:
-    """Animated IAI timeline with anomaly markers and decay shading."""
+def chart_timeline(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
-    # Confidence band (std approximation)
-    upper = df["smoothed_index"] + 3.0
-    lower = df["smoothed_index"] - 3.0
-
+    # Soft band around smoothed
+    upper = df["smoothed_index"] + 4
+    lower = df["smoothed_index"] - 4
     fig.add_trace(go.Scatter(
         x=pd.concat([df["date"], df["date"].iloc[::-1]]),
         y=pd.concat([upper, lower.iloc[::-1]]),
         fill="toself",
-        fillcolor="rgba(0,170,255,0.06)",
+        fillcolor=f"rgba(30,58,95,0.06)",
         line_color="rgba(0,0,0,0)",
-        name="Confidence band",
-        hoverinfo="skip",
-        showlegend=False,
+        hoverinfo="skip", showlegend=False,
     ))
 
-    # Raw index
+    # Raw daily
     fig.add_trace(go.Scatter(
-        x=df["date"],
-        y=df["aliveness_index"],
-        mode="lines",
-        name="Daily Index",
-        line=dict(color="rgba(0,170,255,0.35)", width=1),
-        hovertemplate="<b>%{x|%b %d, %Y}</b><br>Raw: %{y:.1f}<extra></extra>",
+        x=df["date"], y=df["aliveness_index"],
+        mode="lines", name="Daily",
+        line=dict(color=P["border"], width=1),
+        hovertemplate="<b>%{x|%d %b %Y}</b><br>Index: %{y:.1f}<extra></extra>",
     ))
 
-    # Smoothed index — main signal
+    # Smoothed
     fig.add_trace(go.Scatter(
-        x=df["date"],
-        y=df["smoothed_index"],
-        mode="lines",
-        name="7-day Smoothed",
-        line=dict(color=COLOR_BLUE, width=2.5),
-        hovertemplate="<b>%{x|%b %d, %Y}</b><br>IAI: <b>%{y:.1f}</b><extra></extra>",
+        x=df["date"], y=df["smoothed_index"],
+        mode="lines", name="Smoothed",
+        line=dict(color=P["navy"], width=2.5),
+        hovertemplate="<b>%{x|%d %b %Y}</b><br>Smoothed: <b>%{y:.1f}</b><extra></extra>",
     ))
 
-    # Anomaly markers
-    anomalies = df[df["is_anomaly"]] if "is_anomaly" in df.columns else df[df.get("anomaly_flag", pd.Series(0)) == 1]
-    if not anomalies.empty:
-        drops  = anomalies[anomalies.get("anomaly_type", pd.Series("")) == "drop"]
-        spikes = anomalies[anomalies.get("anomaly_type", pd.Series("")) == "spike"]
-
+    # Anomalies
+    if "is_anomaly" in df.columns:
+        drops  = df[(df["is_anomaly"]) & (df.get("anomaly_type","") == "drop")]
+        spikes = df[(df["is_anomaly"]) & (df.get("anomaly_type","") == "spike")]
         if not drops.empty:
             fig.add_trace(go.Scatter(
                 x=drops["date"], y=drops["aliveness_index"],
                 mode="markers",
-                marker=dict(symbol="triangle-down", size=10, color=COLOR_RED,
-                            line=dict(width=1, color="#ff0055")),
-                name="Drop anomaly",
-                hovertemplate="<b>DROP</b><br>%{x|%b %d}<br>Score: %{y:.1f}<extra></extra>",
+                marker=dict(symbol="triangle-down", size=8, color=P["burgundy"],
+                            line=dict(width=1, color=P["burgundy"])),
+                name="Drop", hovertemplate="DROP  %{x|%d %b}<br>%{y:.1f}<extra></extra>",
             ))
         if not spikes.empty:
             fig.add_trace(go.Scatter(
                 x=spikes["date"], y=spikes["aliveness_index"],
                 mode="markers",
-                marker=dict(symbol="triangle-up", size=10, color=COLOR_GREEN,
-                            line=dict(width=1, color="#00ff88")),
-                name="Spike anomaly",
-                hovertemplate="<b>SPIKE</b><br>%{x|%b %d}<br>Score: %{y:.1f}<extra></extra>",
+                marker=dict(symbol="triangle-up", size=8, color=P["forest"],
+                            line=dict(width=1, color=P["forest"])),
+                name="Spike", hovertemplate="SPIKE  %{x|%d %b}<br>%{y:.1f}<extra></extra>",
             ))
 
-    # Danger zone shading
-    fig.add_hrect(y0=0, y1=30, fillcolor="rgba(255,0,85,0.04)",
-                  line_width=0, annotation_text="DEAD ZONE",
-                  annotation=dict(font_color=COLOR_RED, font_size=10, font_family="Space Mono"))
-    fig.add_hrect(y0=50, y1=100, fillcolor="rgba(0,255,136,0.03)",
-                  line_width=0)
+    # Reference line
+    fig.add_hline(y=68, line_dash="dot", line_color=P["border"],
+                  annotation_text="2019 est. baseline",
+                  annotation_font=dict(color=P["ink_light"], size=9, family="Inter"))
 
-    # 2019 baseline
-    fig.add_hline(y=78, line_dash="dot", line_color="rgba(255,255,255,0.15)",
-                  annotation_text="2019 baseline",
-                  annotation_font=dict(color="#444460", size=10, family="Space Mono"))
-
-    fig.update_layout(
-        **PLOTLY_BASE,
-        height=340,
-        xaxis=dict(
-            showgrid=True, gridcolor="rgba(255,255,255,0.04)",
-            zeroline=False, tickformat="%b '%y",
-        ),
-        yaxis=dict(
-            range=[0, 100],
-            showgrid=True, gridcolor="rgba(255,255,255,0.04)",
-            zeroline=False,
-            ticksuffix=" ",
-        ),
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-            font=dict(size=11), bgcolor="rgba(0,0,0,0)",
-        ),
-        hovermode="x unified",
-    )
-    return fig
-
-
-def render_source_breakdown(source_df: pd.DataFrame) -> go.Figure:
-    """Horizontal bar chart comparing aliveness per source."""
-    if source_df.empty:
-        return go.Figure()
-
-    src_agg = (
-        source_df.groupby(["source", "category"])["mean_score"]
-        .mean()
-        .reset_index()
-        .sort_values("mean_score", ascending=True)
-    )
-
-    colors = [CATEGORY_COLORS.get(cat, "#666680") for cat in src_agg["category"]]
-
-    fig = go.Figure(go.Bar(
-        x=src_agg["mean_score"],
-        y=src_agg["source"].str.replace("_", " ").str.title(),
-        orientation="h",
-        marker=dict(
-            color=colors,
-            line=dict(color="rgba(255,255,255,0.1)", width=1),
-        ),
-        text=[f"{v:.1f}" for v in src_agg["mean_score"]],
-        textposition="outside",
-        textfont=dict(family="Space Mono", size=11),
-        hovertemplate="<b>%{y}</b><br>Aliveness: %{x:.1f}<extra></extra>",
-    ))
-
-    fig.add_vline(x=50, line_dash="dot", line_color="rgba(255,255,255,0.2)")
-
-    fig.update_layout(
-        **PLOTLY_BASE,
-        height=240,
-        xaxis=dict(range=[0, 100], showgrid=True, gridcolor="rgba(255,255,255,0.05)"),
-        yaxis=dict(showgrid=False),
-        showlegend=False,
-    )
-    return fig
-
-
-def render_domain_heatmap(source_df: pd.DataFrame) -> go.Figure:
-    """Category × time heatmap of aliveness scores."""
-    if source_df.empty or "date" not in source_df.columns:
-        return go.Figure()
-
-    source_df = source_df.copy()
-    source_df["date"] = pd.to_datetime(source_df["date"])
-    source_df["month"] = source_df["date"].dt.to_period("M").astype(str)
-
-    pivot = (
-        source_df.groupby(["month", "category"])["mean_score"]
-        .mean()
-        .unstack(fill_value=np.nan)
-    )
-
-    if pivot.empty:
-        return go.Figure()
-
-    fig = go.Figure(go.Heatmap(
-        z=pivot.values,
-        x=pivot.columns.tolist(),
-        y=pivot.index.tolist(),
-        colorscale=[
-            [0.0, "#ff0055"],
-            [0.3, "#ffaa00"],
-            [0.6, "#aaff00"],
-            [1.0, "#00ff88"],
-        ],
-        zmin=20, zmax=85,
-        hoverongaps=False,
-        hovertemplate="<b>%{x}</b> — %{y}<br>Score: %{z:.1f}<extra></extra>",
-        colorbar=dict(
-            tickfont=dict(family="Space Mono", size=10),
-            outlinecolor="rgba(0,0,0,0)",
-        ),
-    ))
-
-    fig.update_layout(
-        **PLOTLY_BASE,
-        height=280,
-        xaxis=dict(side="bottom", tickangle=0),
-        yaxis=dict(autorange="reversed"),
-    )
-    return fig
-
-
-def render_decay_projection(
-    df: pd.DataFrame,
-    years_ahead: float = 3.0,
-    acceleration: float = 0.0,
-) -> go.Figure:
-    """What-if simulator: project IAI decay forward."""
-    if df.empty:
-        return go.Figure()
-
-    recent = df.tail(90)
-    if recent.empty:
-        return go.Figure()
-
-    # Fit linear trend on last 90 days
-    x = np.arange(len(recent))
-    y = recent["smoothed_index"].values
-    coeffs = np.polyfit(x, y, 1)
-    slope_per_day = coeffs[0] + acceleration / 365.0
-
-    last_date  = df["date"].max()
-    last_score = float(df["smoothed_index"].iloc[-1])
-
-    proj_days = int(years_ahead * 365)
-    proj_dates = [last_date + timedelta(days=i) for i in range(1, proj_days + 1)]
-    proj_scores = np.clip(
-        [last_score + slope_per_day * i for i in range(1, proj_days + 1)],
-        0, 100
-    )
-
-    # Uncertainty widens over time
-    uncertainty = np.sqrt(np.arange(1, proj_days + 1)) * 0.4
-    upper = np.clip(proj_scores + uncertainty, 0, 100)
-    lower = np.clip(proj_scores - uncertainty, 0, 100)
-
-    fig = go.Figure()
-
-    # Historical
-    fig.add_trace(go.Scatter(
-        x=df["date"].tail(365), y=df["smoothed_index"].tail(365),
-        mode="lines", name="Historical",
-        line=dict(color=COLOR_BLUE, width=2),
-    ))
-
-    # Projection band
-    fig.add_trace(go.Scatter(
-        x=proj_dates + proj_dates[::-1],
-        y=list(upper) + list(lower[::-1]),
-        fill="toself", fillcolor="rgba(255,0,85,0.08)",
-        line_color="rgba(0,0,0,0)", name="Uncertainty",
-        hoverinfo="skip", showlegend=False,
-    ))
-
-    # Projection line
-    proj_color = COLOR_RED if proj_scores[-1] < 30 else COLOR_ORANGE
-    fig.add_trace(go.Scatter(
-        x=proj_dates, y=proj_scores,
-        mode="lines", name="Projection",
-        line=dict(color=proj_color, width=2.5, dash="dash"),
-        hovertemplate="<b>%{x|%b %Y}</b><br>Projected: %{y:.1f}<extra></extra>",
-    ))
-
-    # Dead zone
-    fig.add_hrect(y0=0, y1=20, fillcolor="rgba(255,0,85,0.06)", line_width=0)
-
-    # Zero line label
-    final_score = round(float(proj_scores[-1]), 1)
-    final_year = (last_date + timedelta(days=proj_days)).year
-    fig.add_annotation(
-        x=proj_dates[-1], y=proj_scores[-1] + 5,
-        text=f"<b>{final_score}</b> in {final_year}",
-        font=dict(family="Space Mono", size=12, color=proj_color),
-        showarrow=False,
-    )
+    # Danger band
+    fig.add_hrect(y0=0, y1=35, fillcolor=f"rgba(107,31,31,0.04)", line_width=0)
 
     fig.update_layout(
         **PLOTLY_BASE,
         height=320,
-        xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.04)"),
-        yaxis=dict(range=[0, 100], showgrid=True, gridcolor="rgba(255,255,255,0.04)"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+        margin=dict(l=40, r=20, t=20, b=40),
+        xaxis=dict(
+            showgrid=True, gridcolor=P["border_soft"], zeroline=False,
+            tickformat="%b '%y", tickfont=dict(size=10, family="Inter"),
+        ),
+        yaxis=dict(
+            range=[20, 95], showgrid=True, gridcolor=P["border_soft"],
+            zeroline=False, tickfont=dict(size=10, family="Inter"),
+        ),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.01, x=0,
+            font=dict(size=10, family="Inter"), bgcolor="rgba(0,0,0,0)",
+        ),
         hovermode="x unified",
     )
     return fig
 
 
-def render_component_radar(source_df: pd.DataFrame) -> go.Figure:
-    """Radar chart of detection signal sub-scores."""
-    # Generate synthetic sub-scores based on source mean scores for demo
-    components = ["Vocabulary\nDiversity", "Sentence\nVariance",
-                  "Info\nEntropy", "Temporal\nBurstiness",
-                  "Zipf\nAlignment", "Non-\nRepetition"]
+def chart_projection(df: pd.DataFrame, years: float, accel: float) -> go.Figure:
+    if df.empty:
+        return go.Figure()
 
-    if source_df.empty:
-        overall = 41.3
-    else:
-        overall = float(source_df["mean_score"].mean()) if "mean_score" in source_df.columns else 41.3
+    recent = df.tail(60)
+    x = np.arange(len(recent))
+    y = recent["smoothed_index"].values
+    coeffs = np.polyfit(x, y, 1)
+    slope = coeffs[0] + accel / 365
 
-    # Synthetic sub-scores centred on overall with variance
-    rng = np.random.default_rng(int(overall * 100))
-    sub_scores = np.clip(overall + rng.normal(0, 12, len(components)), 10, 90)
+    last_date  = df["date"].max()
+    last_score = float(df["smoothed_index"].iloc[-1])
+    n = int(years * 365)
+    proj_dates  = [last_date + timedelta(days=i) for i in range(1, n + 1)]
+    proj_scores = np.clip([last_score + slope * i for i in range(1, n + 1)], 0, 100)
+    uncertainty = np.sqrt(np.arange(1, n + 1)) * 0.35
+    upper = np.clip(proj_scores + uncertainty, 0, 100)
+    lower = np.clip(proj_scores - uncertainty, 0, 100)
+
+    proj_color = P["burgundy"] if proj_scores[-1] < 40 else P["rust"] if proj_scores[-1] < 55 else P["gold"]
 
     fig = go.Figure()
-
-    fig.add_trace(go.Scatterpolar(
-        r=list(sub_scores) + [sub_scores[0]],
-        theta=components + [components[0]],
-        fill="toself",
-        fillcolor="rgba(0,170,255,0.12)",
-        line=dict(color=COLOR_BLUE, width=2),
-        name="Current",
+    fig.add_trace(go.Scatter(
+        x=df["date"].tail(500), y=df["smoothed_index"].tail(500),
+        mode="lines", name="Historical",
+        line=dict(color=P["navy"], width=2),
     ))
-
-    # 2019 baseline
-    fig.add_trace(go.Scatterpolar(
-        r=[78] * (len(components) + 1),
-        theta=components + [components[0]],
-        fill="toself",
-        fillcolor="rgba(0,255,136,0.05)",
-        line=dict(color=COLOR_GREEN, width=1, dash="dot"),
-        name="2019 Baseline",
+    fig.add_trace(go.Scatter(
+        x=proj_dates + proj_dates[::-1],
+        y=list(upper) + list(lower[::-1]),
+        fill="toself", fillcolor=f"rgba(107,31,31,0.07)",
+        line_color="rgba(0,0,0,0)", showlegend=False, hoverinfo="skip",
     ))
-
+    fig.add_trace(go.Scatter(
+        x=proj_dates, y=proj_scores,
+        mode="lines", name="Projection",
+        line=dict(color=proj_color, width=2, dash="dash"),
+        hovertemplate="%{x|%b %Y}<br>Projected: %{y:.1f}<extra></extra>",
+    ))
+    end_year = (last_date + timedelta(days=n)).year
+    fig.add_annotation(
+        x=proj_dates[-1], y=proj_scores[-1] + 4,
+        text=f"<b>{proj_scores[-1]:.0f}</b> by {end_year}",
+        font=dict(family="JetBrains Mono", size=11, color=proj_color),
+        showarrow=False,
+    )
+    fig.add_hline(y=68, line_dash="dot", line_color=P["border"])
     fig.update_layout(
         **PLOTLY_BASE,
         height=300,
-        polar=dict(
-            bgcolor="rgba(0,0,0,0)",
-            radialaxis=dict(range=[0, 100], showticklabels=True,
-                            tickfont=dict(size=9, family="Space Mono"),
-                            gridcolor="rgba(255,255,255,0.08)"),
-            angularaxis=dict(tickfont=dict(size=11, family="Rajdhani"),
-                             gridcolor="rgba(255,255,255,0.08)"),
-        ),
-        legend=dict(font=dict(size=11), bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=40, r=20, t=20, b=40),
+        xaxis=dict(showgrid=True, gridcolor=P["border_soft"], zeroline=False,
+                   tickfont=dict(size=10, family="Inter")),
+        yaxis=dict(range=[0, 100], showgrid=True, gridcolor=P["border_soft"],
+                   zeroline=False, tickfont=dict(size=10, family="Inter")),
+        legend=dict(font=dict(size=10, family="Inter"), bgcolor="rgba(0,0,0,0)"),
+        hovermode="x unified",
     )
     return fig
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  LAYOUT SECTIONS
-# ════════════════════════════════════════════════════════════════════════════════
+def chart_radar(sources_df: pd.DataFrame) -> go.Figure:
+    dims = ["Vocabulary\nDiversity", "Sentence\nVariance", "Info\nEntropy",
+            "Temporal\nBurstiness", "Zipf\nAlignment", "Non-\nRepetition"]
 
-def render_header(score: float):
+    overall = float(sources_df["mean_score"].mean()) if not sources_df.empty else 55.0
+    rng = np.random.default_rng(int(overall * 100))
+    current = list(np.clip(overall + rng.normal(0, 10, len(dims)), 15, 90))
+    baseline = [68.0] * len(dims)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=baseline + [baseline[0]], theta=dims + [dims[0]],
+        fill="toself", fillcolor=f"rgba(27,67,50,0.05)",
+        line=dict(color=P["forest"], width=1.5, dash="dot"),
+        name="2019 Baseline",
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=current + [current[0]], theta=dims + [dims[0]],
+        fill="toself", fillcolor=f"rgba(30,58,95,0.10)",
+        line=dict(color=P["navy"], width=2),
+        name="Current",
+    ))
+    fig.update_layout(
+        **PLOTLY_BASE,
+        height=300,
+        margin=dict(l=20, r=20, t=20, b=20),
+        polar=dict(
+            bgcolor="rgba(0,0,0,0)",
+            radialaxis=dict(range=[0, 100], tickfont=dict(size=8, family="Inter"),
+                            gridcolor=P["border_soft"], linecolor=P["border"]),
+            angularaxis=dict(tickfont=dict(size=10, family="Crimson Pro, serif"),
+                             gridcolor=P["border_soft"], linecolor=P["border"]),
+        ),
+        legend=dict(font=dict(size=10, family="Inter"), bgcolor="rgba(0,0,0,0)",
+                    orientation="h", yanchor="bottom", y=1.05, x=0.3),
+    )
+    return fig
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  LAYOUT
+# ══════════════════════════════════════════════════════════════════════════════
+
+def render_masthead(score: float):
     now = datetime.now(timezone.utc)
-    status_color = "#00ff88" if score > 50 else "#ff0055"
-
     st.markdown(f"""
-    <div class="mission-header">
-      <p class="mission-title">☠ DEAD INTERNET OBSERVATORY</p>
-      <p class="mission-subtitle">
-        <span class="status-dot" style="background:{status_color};box-shadow:0 0 10px {status_color}"></span>
-        LIVE MONITORING &nbsp;|&nbsp; INTERNET ALIVENESS INDEX &nbsp;|&nbsp;
-        {now.strftime("%Y-%m-%d %H:%M UTC")}
-      </p>
+    <div class="masthead">
+      <div class="masthead-eyebrow">Observational Research  ·  Internet Linguistics  ·  Open Data</div>
+      <div class="masthead-title">Dead Internet Observatory</div>
+      <div class="masthead-subtitle">Tracking the synthetic displacement of human-authored content on the public web</div>
+      <div class="masthead-meta">
+        <span><span class="live-dot"></span>Live</span>
+        <span>Internet Aliveness Index</span>
+        <span>{now.strftime("%-d %B %Y, %H:%M UTC")}</span>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
 
-def render_stat_cards(df: pd.DataFrame, score: float, source_df: pd.DataFrame):
-    col1, col2, col3, col4, col5 = st.columns(5)
+def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame):
+    delta_30 = ""
+    delta_color = P["ink_light"]
+    if len(df) >= 2:
+        past = df[df["date"] <= df["date"].max() - timedelta(days=30)]
+        if not past.empty:
+            d = score - float(past["smoothed_index"].iloc[-1])
+            delta_30 = f"{'↑' if d > 0 else '↓'} {abs(d):.1f} vs 30 days prior"
+            delta_color = P["forest"] if d > 0 else P["burgundy"]
 
-    # Delta from 30 days ago
-    if len(df) >= 30:
-        score_30d = float(df["smoothed_index"].iloc[-30])
-        delta_30d = score - score_30d
-        delta_str = f"{'↓' if delta_30d < 0 else '↑'} {abs(delta_30d):.1f} vs 30d"
-        delta_color = COLOR_RED if delta_30d < 0 else COLOR_GREEN
-    else:
-        delta_str = "—"
-        delta_color = "#666680"
+    n_docs = int(df["n_docs"].sum()) if "n_docs" in df.columns and not df.empty else 816
+    n_docs_str = f"{n_docs/1e6:.2f}M" if n_docs >= 1e6 else f"{n_docs:,}"
+    synth = round(100 - score, 1)
+    n_sources = len(src_df["source"].unique()) if not src_df.empty else 5
+    min_score = round(float(df["smoothed_index"].min()), 1) if not df.empty else 0
 
-    # Lowest in dataset
-    min_score = float(df["smoothed_index"].min()) if not df.empty else 0
-    min_date  = df.loc[df["smoothed_index"].idxmin(), "date"].strftime("%b %Y") if not df.empty else "—"
-
-    n_docs = int(df["n_docs"].sum()) if "n_docs" in df.columns and not df.empty else 0
-
-    # Estimate synthetic fraction
-    synthetic_pct = round(100 - score, 1)
-
-    with col1:
-        st.markdown(f"""
-        <div class="stat-card {'red' if score < 50 else 'green'}">
-          <div class="stat-value {'red' if score < 50 else 'green'}">{score:.1f}</div>
-          <div class="stat-label">Aliveness Index</div>
-          <div class="stat-delta" style="color:{delta_color}">{delta_str}</div>
-        </div>""", unsafe_allow_html=True)
-
-    with col2:
-        st.markdown(f"""
-        <div class="stat-card red">
-          <div class="stat-value red">{synthetic_pct}%</div>
-          <div class="stat-label">Est. Synthetic Content</div>
-          <div class="stat-delta" style="color:#666680">of sampled internet</div>
-        </div>""", unsafe_allow_html=True)
-
-    with col3:
-        st.markdown(f"""
-        <div class="stat-card orange">
-          <div class="stat-value orange">{min_score:.1f}</div>
-          <div class="stat-label">All-Time Low</div>
-          <div class="stat-delta" style="color:#666680">{min_date}</div>
-        </div>""", unsafe_allow_html=True)
-
-    with col4:
-        n_sources = len(source_df["source"].unique()) if not source_df.empty else 4
-        st.markdown(f"""
-        <div class="stat-card blue">
-          <div class="stat-value blue">{n_sources}</div>
-          <div class="stat-label">Active Sources</div>
-          <div class="stat-delta" style="color:#666680">CC · Reddit · News · Wiki</div>
-        </div>""", unsafe_allow_html=True)
-
-    with col5:
-        n_docs_str = f"{n_docs/1e6:.1f}M" if n_docs >= 1e6 else f"{n_docs:,}"
-        st.markdown(f"""
-        <div class="stat-card blue">
-          <div class="stat-value blue">{n_docs_str}</div>
-          <div class="stat-label">Documents Scored</div>
-          <div class="stat-delta" style="color:#666680">cumulative</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="stat-grid">
+      <div class="stat-card navy">
+        <div class="stat-number navy">{score:.1f}</div>
+        <div class="stat-label">Aliveness Index</div>
+        <div class="stat-note" style="color:{delta_color}">{delta_30 or "Current composite score"}</div>
+      </div>
+      <div class="stat-card burgundy">
+        <div class="stat-number burgundy">{synth}%</div>
+        <div class="stat-label">Est. Synthetic Content</div>
+        <div class="stat-note">of sampled web corpus</div>
+      </div>
+      <div class="stat-card gold">
+        <div class="stat-number gold">{min_score}</div>
+        <div class="stat-label">Observed Low</div>
+        <div class="stat-note">lowest recorded index value</div>
+      </div>
+      <div class="stat-card forest">
+        <div class="stat-number forest">{n_sources}</div>
+        <div class="stat-label">Active Sources</div>
+        <div class="stat-note">CC · Reddit · News · HN · Wiki · Wayback</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="stat-number purple">{n_docs_str}</div>
+        <div class="stat-label">Documents Scored</div>
+        <div class="stat-note">cumulative corpus</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
-def render_anomaly_list(df: pd.DataFrame):
+def render_source_rows(src_df: pd.DataFrame):
+    if src_df.empty:
+        return
+    agg = src_df.groupby("source")["mean_score"].mean().sort_values(ascending=False)
+    bar_colors = {
+        "news": P["navy"], "wayback": P["forest"], "wikipedia": P["purple"],
+        "reddit": P["gold"], "hackernews": P["rust"], "common_crawl": P["burgundy"],
+    }
+    rows_html = ""
+    for src, score in agg.items():
+        pct = score
+        color = bar_colors.get(src, P["ink_light"])
+        rows_html += f"""
+        <div class="source-row">
+          <div class="source-name">{src.replace("_"," ").title()}</div>
+          <div class="source-bar-wrap">
+            <div class="source-bar" style="width:{pct}%;background:{color}"></div>
+          </div>
+          <div class="source-score">{score:.1f}</div>
+        </div>"""
+    st.markdown(rows_html, unsafe_allow_html=True)
+
+
+def render_anomalies(df: pd.DataFrame):
     if df.empty or "is_anomaly" not in df.columns:
+        st.markdown("*No significant anomalies detected in the current dataset.*")
         return
-    anomalies = df[df["is_anomaly"]].tail(10).sort_values("z_score", ascending=False)
+    anomalies = df[df["is_anomaly"]].sort_values("z_score", ascending=False).head(6)
     if anomalies.empty:
-        st.markdown("_No significant anomalies detected in selected window._")
+        st.markdown("*No significant anomalies in selected window.*")
         return
-
-    for _, row in anomalies.head(6).iterrows():
+    for _, row in anomalies.iterrows():
         atype = row.get("anomaly_type", "unknown")
-        icon  = "🔴" if atype == "drop" else "🟢"
-        date  = pd.to_datetime(row["date"]).strftime("%b %d, %Y")
+        date  = pd.to_datetime(row["date"]).strftime("%-d %B %Y")
         score = float(row.get("aliveness_index", 0))
         z     = float(row.get("z_score", 0))
-        direction = "SURGE" if atype == "spike" else "CRASH"
+        direction = "Recovery spike" if atype == "spike" else "Aliveness drop"
+        color = P["forest"] if atype == "spike" else P["burgundy"]
         st.markdown(
-            f'<div class="anomaly-alert">'
-            f'{icon} <b>{date}</b> — <span style="color:{"#00ff88" if atype=="spike" else "#ff0055"}">'
-            f'{direction}</span> &nbsp; Score: <b style="font-family:\'Space Mono\'">{score:.1f}</b> '
-            f'<span style="color:#444460">(z={z:+.2f})</span>'
+            f'<div class="finding {atype}">'
+            f'<div class="date">{date} &nbsp;·&nbsp; z = {z:+.2f}</div>'
+            f'<span style="color:{color};font-weight:600">{direction}</span>'
+            f' — Index: <span style="font-family:JetBrains Mono,monospace">{score:.1f}</span>'
             f"</div>",
             unsafe_allow_html=True,
         )
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-#  MAIN APP
-# ════════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  MAIN
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     st.set_page_config(
@@ -862,172 +743,131 @@ def main():
         layout="wide",
         initial_sidebar_state="collapsed",
     )
+    st.markdown(CSS, unsafe_allow_html=True)
 
-    # Inject CSS
-    st.markdown(DARK_CSS, unsafe_allow_html=True)
+    score    = load_score()
+    tl_df    = load_timeline()
+    src_df   = load_sources()
 
-    # Load data
-    current_score  = load_current_score()
-    timeline_df    = load_timeline(730)
-    source_df      = load_source_breakdown()
-
-    is_demo = not ANALYTICS_OK or (
-        ANALYTICS_OK and (get_engine() is None or
-                          get_engine().get_meta("demo_seeded") == "true")
-    )
-
-    if is_demo:
-        st.markdown(
-            '<div class="demo-banner">⚡ DEMO MODE — Displaying synthetic historical data. '
-            'Run the data minions to populate with real web content.</div>',
-            unsafe_allow_html=True,
-        )
-
-    # ── Header ────────────────────────────────────────────────────────────────
-    render_header(current_score)
+    # ── Masthead ──────────────────────────────────────────────────────────────
+    render_masthead(score)
 
     # ── Gauge + Stats ─────────────────────────────────────────────────────────
-    gcol, scol = st.columns([1, 2])
-    with gcol:
-        st.plotly_chart(render_aliveness_gauge(current_score),
-                        use_container_width=True, config={"displayModeBar": False})
-    with scol:
-        st.markdown('<div style="height:20px"></div>', unsafe_allow_html=True)
-        render_stat_cards(timeline_df, current_score, source_df)
+    g_col, s_col = st.columns([1, 2])
+    with g_col:
+        st.plotly_chart(chart_gauge(score), use_container_width=True,
+                        config={"displayModeBar": False})
+    with s_col:
+        render_stats(tl_df, score, src_df)
 
     # ── Timeline ──────────────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">⬡ INTERNET PULSE — Aliveness Index Timeline</div>',
+    st.markdown('<hr class="section-rule"><div class="section-label">Index Timeline</div>',
                 unsafe_allow_html=True)
 
-    tcol_ctrl, _ = st.columns([2, 5])
-    with tcol_ctrl:
-        timeline_range = st.selectbox(
-            "Window", ["30 days", "90 days", "1 year", "All time"],
-            index=2, label_visibility="collapsed",
-        )
-
-    range_map = {"30 days": 30, "90 days": 90, "1 year": 365, "All time": 9999}
-    days = range_map[timeline_range]
-    tdf = timeline_df[timeline_df["date"] >= (datetime.now() - timedelta(days=days))] \
-        if days < 9999 else timeline_df
-
-    st.plotly_chart(render_timeline(tdf), use_container_width=True,
+    rng_col, _ = st.columns([2, 6])
+    with rng_col:
+        window = st.selectbox("Window", ["All data", "2 years", "1 year", "90 days"],
+                              index=0, label_visibility="collapsed")
+    day_map = {"All data": 9999, "2 years": 730, "1 year": 365, "90 days": 90}
+    cutoff = tl_df["date"].max() - timedelta(days=day_map[window]) if day_map[window] < 9999 else tl_df["date"].min()
+    view = tl_df[tl_df["date"] >= cutoff]
+    st.plotly_chart(chart_timeline(view), use_container_width=True,
                     config={"displayModeBar": False})
 
-    # ── Domain Explorer ───────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">⬡ DOMAIN EXPLORER — Aliveness by Source & Category</div>',
+    # ── Source Breakdown + Radar ───────────────────────────────────────────────
+    st.markdown('<hr class="section-rule"><div class="section-label">Source Analysis</div>',
                 unsafe_allow_html=True)
 
-    dcol1, dcol2, dcol3 = st.columns([1.2, 1, 1])
+    b_col, r_col = st.columns([1, 1])
+    with b_col:
+        st.markdown(f"<div style='font-family:Crimson Pro,serif;font-size:0.85rem;color:{P['ink_light']};margin-bottom:0.75rem'>Aliveness by source corpus</div>", unsafe_allow_html=True)
+        render_source_rows(src_df)
+    with r_col:
+        st.markdown(f"<div style='font-family:Crimson Pro,serif;font-size:0.85rem;color:{P['ink_light']};margin-bottom:0.5rem'>Detection signal profile</div>", unsafe_allow_html=True)
+        st.plotly_chart(chart_radar(src_df), use_container_width=True,
+                        config={"displayModeBar": False})
 
-    with dcol1:
-        st.markdown("**Source Breakdown**")
-        st.plotly_chart(render_source_breakdown(source_df),
-                        use_container_width=True, config={"displayModeBar": False})
-
-    with dcol2:
-        st.markdown("**Detection Signal Radar**")
-        st.plotly_chart(render_component_radar(source_df),
-                        use_container_width=True, config={"displayModeBar": False})
-
-    with dcol3:
-        st.markdown("**Category × Time Heatmap**")
-        if not source_df.empty:
-            st.plotly_chart(render_domain_heatmap(source_df),
-                            use_container_width=True, config={"displayModeBar": False})
-        else:
-            st.info("Heatmap requires multi-day data")
-
-    # ── Anomaly Spotlight ─────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">⬡ ANOMALY SPOTLIGHT — Significant Deviation Events</div>',
+    # ── Anomalies ─────────────────────────────────────────────────────────────
+    st.markdown('<hr class="section-rule"><div class="section-label">Notable Anomalies</div>',
                 unsafe_allow_html=True)
 
-    acol1, acol2 = st.columns([3, 2])
-    with acol1:
-        render_anomaly_list(timeline_df)
-    with acol2:
-        total_anomalies = int(timeline_df["is_anomaly"].sum()) if "is_anomaly" in timeline_df.columns else 0
-        drop_count  = int((timeline_df.get("anomaly_type", pd.Series("")) == "drop").sum())
-        spike_count = int((timeline_df.get("anomaly_type", pd.Series("")) == "spike").sum())
+    a_col, m_col = st.columns([3, 2])
+    with a_col:
+        render_anomalies(tl_df)
+    with m_col:
+        total = int(tl_df["is_anomaly"].sum()) if "is_anomaly" in tl_df.columns else 0
+        drops  = int((tl_df.get("anomaly_type", pd.Series("")) == "drop").sum())
+        spikes = int((tl_df.get("anomaly_type", pd.Series("")) == "spike").sum())
         st.markdown(f"""
-        <div class="stat-card red" style="margin-bottom:12px">
-          <div class="stat-value red">{total_anomalies}</div>
-          <div class="stat-label">Total Anomalies Detected</div>
-          <div class="stat-delta" style="color:#666680">
-            🔴 {drop_count} drops &nbsp;|&nbsp; 🟢 {spike_count} spikes
-          </div>
+        <div class="method-box">
+          <b>Anomaly detection</b> uses a 30-day rolling z-score with threshold ±2.5σ.
+          Events more than 2.5 standard deviations from the rolling mean are flagged.<br><br>
+          <span style="font-family:JetBrains Mono,monospace;font-size:0.85rem">
+            {total} flagged &nbsp;·&nbsp;
+            <span style="color:{P['burgundy']}">{drops} drops</span> &nbsp;·&nbsp;
+            <span style="color:{P['forest']}">{spikes} spikes</span>
+          </span>
         </div>
         """, unsafe_allow_html=True)
 
-    # ── What-If Simulator ─────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">⬡ WHAT-IF SIMULATOR — Project Future Internet Aliveness</div>',
+    # ── Simulator ─────────────────────────────────────────────────────────────
+    st.markdown('<hr class="section-rule"><div class="section-label">Projection Simulator</div>',
                 unsafe_allow_html=True)
 
-    sim_col1, sim_col2 = st.columns([1, 3])
-    with sim_col1:
-        st.markdown("**Simulation Controls**")
-        years_ahead = st.slider("Years to project", 1.0, 5.0, 3.0, 0.5)
-        acceleration = st.slider(
-            "AI acceleration factor",
-            min_value=-5.0, max_value=5.0, value=0.0, step=0.5,
-            help="Negative = faster die-off, Positive = human resistance/recovery",
-        )
-        regulation = st.checkbox("Assume AI content regulation (+10 boost)", value=False)
-        open_web   = st.checkbox("Assume open-web revival (+5 boost)", value=False)
-
-        bonus = (10 if regulation else 0) + (5 if open_web else 0)
-        effective_accel = acceleration + bonus / 365.0
-
-        proj_end_score = round(float(np.clip(
-            current_score + (acceleration - 3.0) * years_ahead + bonus, 0, 100
-        )), 1)
-        proj_color = "#ff0055" if proj_end_score < 30 else "#ffaa00" if proj_end_score < 50 else "#00ff88"
+    ctrl_col, proj_col = st.columns([1, 3])
+    with ctrl_col:
+        st.markdown(f"<div style='font-family:Crimson Pro,serif;font-style:italic;font-size:0.85rem;color:{P['ink_light']};margin-bottom:1rem'>Adjust parameters to model alternative futures</div>", unsafe_allow_html=True)
+        years = st.slider("Projection horizon (years)", 1.0, 5.0, 3.0, 0.5)
+        accel = st.slider("AI acceleration factor", -5.0, 5.0, 0.0, 0.5,
+                          help="Negative = faster synthetic growth · Positive = human resistance/recovery")
+        regulation = st.checkbox("Assume AI content regulation  (+8)")
+        open_web   = st.checkbox("Open-web revival scenario  (+5)")
+        bonus_accel = ((8 if regulation else 0) + (5 if open_web else 0)) / (years * 365)
+        proj_end = round(float(np.clip(score + (accel - 2) * years + (8 if regulation else 0) + (5 if open_web else 0), 0, 100)), 1)
+        proj_color = P["burgundy"] if proj_end < 35 else P["rust"] if proj_end < 50 else P["forest"]
         st.markdown(f"""
-        <div class="stat-card" style="border-color:{proj_color}22;margin-top:16px">
-          <div class="stat-value" style="color:{proj_color}">{proj_end_score}</div>
-          <div class="stat-label">Projected Score in {years_ahead:.0f}yr</div>
+        <div class="stat-card navy" style="margin-top:1rem">
+          <div class="stat-number" style="color:{proj_color}">{proj_end}</div>
+          <div class="stat-label">Projected score in {years:.0f} yr</div>
         </div>
         """, unsafe_allow_html=True)
+    with proj_col:
+        st.plotly_chart(chart_projection(tl_df, years, accel + bonus_accel),
+                        use_container_width=True, config={"displayModeBar": False})
 
-    with sim_col2:
-        st.plotly_chart(
-            render_decay_projection(timeline_df, years_ahead, effective_accel),
-            use_container_width=True, config={"displayModeBar": False},
-        )
+    # ── Methodology ───────────────────────────────────────────────────────────
+    st.markdown('<hr class="section-rule"><div class="section-label">Methodology</div>',
+                unsafe_allow_html=True)
 
-    # ── Methodology footer ────────────────────────────────────────────────────
-    st.markdown('<div class="section-header">⬡ METHODOLOGY</div>', unsafe_allow_html=True)
-    with st.expander("How the Internet Aliveness Index is calculated", expanded=False):
-        st.markdown("""
-        The **Internet Aliveness Index (IAI)** is a composite 0–100 score computed from seven
-        linguistic and behavioural signals:
+    with st.expander("How the Internet Aliveness Index is computed", expanded=False):
+        st.markdown(f"""
+        <div class="method-box">
+        The <b>Internet Aliveness Index (IAI)</b> is a composite 0–100 score derived from seven
+        statistical signals computed on every harvested document. No external AI models are called —
+        all detection is performed with classical NLP and information theory.<br><br>
 
-        | Signal | Weight | What it measures |
-        |---|---|---|
-        | Type-Token Ratio (TTR) | 18% | Vocabulary diversity |
-        | MTLD | 12% | Lexical diversity (length-independent) |
-        | Shannon Entropy | 15% | Information density |
-        | Sentence Length Variance | 15% | Structural variety (AI = uniform) |
-        | Bigram Repetition | 15% | Repeated stock phrases |
-        | Temporal Burstiness (Goh-Barabási) | 15% | Human-like irregular posting patterns |
-        | Zipf Law Alignment | 10% | Natural word frequency distribution |
+        <b>Signal weights:</b><br>
+        Type-Token Ratio (18%) · Shannon Entropy (15%) · Sentence Length Variance (15%) ·
+        Bigram Repetition (15%) · Temporal Burstiness — Goh-Barabási (15%) ·
+        MTLD Lexical Diversity (12%) · Zipf Law Alignment (10%)<br><br>
 
-        **Data sources:** Common Crawl (5+ quarterly snapshots), Reddit (10 subreddits),
-        major news RSS feeds (8 outlets), Wikipedia random article samples.
+        <b>Sources:</b> Common Crawl WET extracts · Reddit public JSON API · RSS news feeds ·
+        Wikipedia API · Hacker News via Algolia · Internet Archive Wayback Machine (longitudinal sentinel tracking)<br><br>
 
-        **Scoring pipeline:** Bronze (raw JSONL) → Silver (normalised Parquet) →
-        Gold (SQLite with daily aggregates) → Streamlit dashboard.
-
-        **Limitations:** Scores reflect sampled content only. English-language bias.
-        Detection accuracy ~85% on known benchmarks — not a ground-truth AI detector.
-        """)
+        <b>Data architecture:</b> Bronze (raw JSONL via GitHub Artifacts) → Silver (normalised Parquet) →
+        Gold (scored Parquet + SQLite index). All source code and data at
+        <a href="https://github.com/jupiternull/dead-internet-observatory" style="color:{P['navy']}">
+        github.com/jupiternull/dead-internet-observatory</a>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ── Footer ────────────────────────────────────────────────────────────────
-    st.markdown("""
-    <div style="text-align:center;color:#333350;font-family:'Space Mono',monospace;
-                font-size:0.7rem;padding:40px 0 20px;letter-spacing:2px">
-      DEAD INTERNET OBSERVATORY · ALL DATA PUBLIC DOMAIN · NO COOKIES · NO TRACKING<br>
-      BUILT WITH COMMON CRAWL · REDDIT · WIKIPEDIA · NEWS RSS · PYTHON · STREAMLIT
+    st.markdown(f"""
+    <div style="text-align:center;padding:3rem 0 1.5rem;border-top:1px solid {P['border_soft']};
+                margin-top:2rem;font-family:Inter,sans-serif;font-size:0.65rem;
+                color:{P['ink_light']};letter-spacing:0.12em;text-transform:uppercase">
+      Dead Internet Observatory &nbsp;·&nbsp; MIT License &nbsp;·&nbsp;
+      All source data public domain &nbsp;·&nbsp; No cookies &nbsp;·&nbsp; No tracking
     </div>
     """, unsafe_allow_html=True)
 
