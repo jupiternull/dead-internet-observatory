@@ -414,11 +414,12 @@ def chart_gauge(score: float) -> go.Figure:
     else:
         color, label = P["burgundy"], "Critical — Internet Largely Synthetic"
 
+    ink_light = P["ink_light"]
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
         title=dict(
-            text=f"<span style='font-family:Crimson Pro,serif;font-size:13px;color:{P[\"ink_light\"]};font-style:italic'>{label}</span>",
+            text=f"<span style='font-family:Crimson Pro,serif;font-size:13px;color:{ink_light};font-style:italic'>{label}</span>",
             font=dict(size=13),
         ),
         number=dict(
@@ -455,7 +456,7 @@ def chart_gauge(score: float) -> go.Figure:
         margin=dict(l=20, r=20, t=40, b=10),
         annotations=[dict(
             x=0.5, y=0.08, xanchor="center",
-            text=f"<span style='font-family:Inter,sans-serif;font-size:9px;color:{P[\"ink_light\"]};letter-spacing:0.1em'>ESTIMATED 2019 BASELINE  ▲  68.0</span>",
+            text=f"<span style='font-family:Inter,sans-serif;font-size:9px;color:{ink_light};letter-spacing:0.1em'>ESTIMATED 2019 BASELINE  ▲  68.0</span>",
             showarrow=False,
         )],
     )
