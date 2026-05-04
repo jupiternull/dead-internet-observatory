@@ -73,13 +73,39 @@ CSS = f"""
 @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ── Base ── */
-html, body, [class*="css"] {{
+html, body {{
     background-color: {P["bg"]} !important;
     color: {P["ink"]} !important;
+    font-family: 'Inter', sans-serif;
 }}
-body {{ font-family: 'Inter', sans-serif; }}
+/* Streamlit root containers (works across versions) */
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] > .main,
+[data-testid="stMain"],
+section[data-testid="stSidebar"],
+div[data-testid="stVerticalBlock"] {{
+    background-color: {P["bg"]} !important;
+}}
+/* Streamlit widget backgrounds */
+[data-testid="stForm"],
+[data-testid="stExpander"],
+div.stSelectbox > div > div,
+div.stSlider {{
+    background-color: {P["card"]} !important;
+    border-color: {P["border"]} !important;
+}}
+/* Text color propagation */
+.stApp, .stApp p, .stApp span, .stApp label,
+.stMarkdown p, .stMarkdown span {{
+    color: {P["ink"]} !important;
+}}
 #MainMenu, footer, header {{ visibility: hidden; }}
-.block-container {{ padding-top: 2rem !important; max-width: 1280px; }}
+.block-container,
+[data-testid="stMainBlockContainer"] {{
+    padding-top: 2rem !important;
+    max-width: 1280px;
+}}
 ::-webkit-scrollbar {{ width: 5px; }}
 ::-webkit-scrollbar-track {{ background: {P["bg_dark"]}; }}
 ::-webkit-scrollbar-thumb {{ background: {P["border"]}; border-radius: 3px; }}
