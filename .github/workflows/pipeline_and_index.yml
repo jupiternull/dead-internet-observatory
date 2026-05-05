@@ -9,6 +9,12 @@ on:
       - "🌐 Common Crawl Minion"
       - "🔶 HackerNews Minion"
       - "🕰️ Wayback Machine Minion"
+      - "🦋 Bluesky Minion"
+      - "🐸 4chan Minion"
+      - "🎮 Steam Minion"
+      - "📺 YouTube Minion"
+      - "💼 LinkedIn Minion"
+      - "🐦 Twitter/X Minion"
     types: [completed]
   schedule:
     - cron: "0 6 * * *"       # Daily at 06:00 UTC — catches all overnight minions
@@ -44,7 +50,7 @@ jobs:
         with:
           workflow_conclusion: success
           name_is_regexp: true
-          name: "^(reddit|news|wikipedia|hn|wayback|commoncrawl)-bronze-"
+          name: "^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter)-bronze-"
           path: data/bronze/
           if_no_artifact_found: warn
         continue-on-error: true

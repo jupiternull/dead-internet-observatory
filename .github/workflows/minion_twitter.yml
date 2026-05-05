@@ -1,0 +1,39 @@
+name: "🐦 Twitter/X Minion"
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests pyyaml feedparser beautifulsoup4 lxml tqdm
+
+      - name: Run Twitter/X Minion
+        run: python3 -m minions.twitter_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+
+      - name: Upload bronze data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: twitter-bronze-${{ github.run_id }}
+          path: data/bronze/twitter/
+          retention-days: 7
+          if-no-files-found: warn

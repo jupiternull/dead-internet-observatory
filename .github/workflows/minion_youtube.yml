@@ -1,0 +1,39 @@
+name: "📺 YouTube Minion"
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests pyyaml tqdm
+
+      - name: Run YouTube Minion
+        run: python3 -m minions.youtube_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+
+      - name: Upload bronze data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-bronze-${{ github.run_id }}
+          path: data/bronze/youtube/
+          retention-days: 7
+          if-no-files-found: warn

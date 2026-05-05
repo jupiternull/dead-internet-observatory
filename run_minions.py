@@ -10,6 +10,12 @@ Usage:
     python run_minions.py hackernews
     python run_minions.py wayback
     python run_minions.py commoncrawl [--dry-run]
+    python run_minions.py bluesky
+    python run_minions.py fourchan
+    python run_minions.py steam
+    python run_minions.py youtube
+    python run_minions.py linkedin
+    python run_minions.py twitter
     python run_minions.py pipeline      # bronze → silver → gold
     python run_minions.py seed-demo     # populate SQLite with synthetic data
 """
@@ -52,6 +58,36 @@ def cmd_wayback(_args):
     WaybackMinion().run()
 
 
+def cmd_bluesky(_args):
+    from minions.bluesky_bot import BlueskyBot
+    BlueskyBot().run()
+
+
+def cmd_fourchan(_args):
+    from minions.fourchan_bot import FourchanBot
+    FourchanBot().run()
+
+
+def cmd_steam(_args):
+    from minions.steam_bot import SteamBot
+    SteamBot().run()
+
+
+def cmd_youtube(_args):
+    from minions.youtube_bot import YoutubeBot
+    YoutubeBot().run()
+
+
+def cmd_linkedin(_args):
+    from minions.linkedin_bot import LinkedinBot
+    LinkedinBot().run()
+
+
+def cmd_twitter(_args):
+    from minions.twitter_bot import TwitterBot
+    TwitterBot().run()
+
+
 def cmd_pipeline(_args):
     from pipeline.bronze_ingestion import BronzeToSilverPipeline
     from pipeline.silver_processing import SilverToGoldPipeline
@@ -65,7 +101,9 @@ def cmd_seed_demo(_args):
 
 
 def cmd_all(args):
-    for fn in [cmd_reddit, cmd_news, cmd_wikipedia, cmd_hackernews, cmd_pipeline]:
+    for fn in [cmd_reddit, cmd_news, cmd_wikipedia, cmd_hackernews,
+               cmd_bluesky, cmd_fourchan, cmd_steam, cmd_linkedin, cmd_twitter,
+               cmd_pipeline]:
         fn(args)
 
 
@@ -77,6 +115,12 @@ COMMANDS = {
     "hackernews":  cmd_hackernews,
     "wayback":     cmd_wayback,
     "commoncrawl": cmd_commoncrawl,
+    "bluesky":     cmd_bluesky,
+    "fourchan":    cmd_fourchan,
+    "steam":       cmd_steam,
+    "youtube":     cmd_youtube,
+    "linkedin":    cmd_linkedin,
+    "twitter":     cmd_twitter,
     "pipeline":    cmd_pipeline,
     "seed-demo":   cmd_seed_demo,
 }

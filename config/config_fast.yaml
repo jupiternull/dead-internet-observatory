@@ -1,0 +1,111 @@
+analytics:
+  anomaly_zscore_threshold: 2.5
+  historical_baseline_year: 2019
+  index_smoothing_window: 7
+  trend_min_data_points: 14
+app:
+  baseline_aliveness: 78.0
+  cache_ttl_seconds: 3600
+  current_aliveness: 41.3
+  demo_mode: false
+  refresh_hint_seconds: 300
+detection:
+  max_text_length_for_features: 5000
+  min_text_length: 80
+  weights:
+    burstiness: 0.15
+    entropy: 0.15
+    mtld: 0.12
+    repetition: 0.15
+    sentence_variance: 0.15
+    ttr: 0.18
+    zipf_deviation: 0.1
+project:
+  description: Tracking the synthetic takeover of the public internet
+  name: Dead Internet Observatory
+  version: 1.0.0
+sources:
+  common_crawl:
+    crawl_dates:
+    - 2023-14
+    - 2024-10
+    - 2024-33
+    - 2025-06
+    - 2025-21
+    enabled: true
+    max_records_per_wet: 2000
+    max_segments_per_date: 3
+    wet_files_per_segment: 5
+  hackernews:
+    enabled: true
+    include_comments: false
+    lookback_days: 7
+    max_comments_per_story: 30
+    max_stories: 200
+  news:
+    enabled: true
+    feeds:
+    - https://feeds.reuters.com/reuters/topNews
+    - https://rss.cnn.com/rss/edition.rss
+    - https://feeds.bbci.co.uk/news/rss.xml
+    - https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml
+    - https://feeds.washingtonpost.com/rss/world
+    - https://www.theguardian.com/world/rss
+    - https://feeds.npr.org/1001/rss.xml
+    - https://rss.politico.com/politics-news.xml
+    max_articles_per_feed: 40
+    request_timeout: 20
+  reddit:
+    enabled: true
+    include_comments: false
+    max_comments_per_post: 50
+    posts_per_sub: 50
+    subreddits:
+    - worldnews
+    - technology
+    - science
+    - politics
+    - AskReddit
+    - todayilearned
+    - news
+    - gaming
+    - explainlikeimfive
+    - changemyview
+  wayback:
+    enabled: true
+    sentinel_urls:
+    - https://www.reuters.com/
+    - https://www.bbc.com/news
+    - https://www.theguardian.com/international
+    - https://apnews.com/
+    - https://news.ycombinator.com/
+    - https://techcrunch.com/
+    - https://old.reddit.com/r/worldnews/
+    - https://old.reddit.com/r/technology/
+    - https://old.reddit.com/r/science/
+    - https://en.wikipedia.org/wiki/Artificial_intelligence
+    - https://en.wikipedia.org/wiki/Main_Page
+    - https://news.ycombinator.com/
+    - https://lobste.rs/
+    - https://marginalrevolution.com/
+    snapshot_years:
+    - 2019
+    - 2021
+    - 2023
+    - 2024
+    - 2025
+    snapshots_per_year: 2
+  wikipedia:
+    enabled: true
+    recent_changes_hours: 0
+    sample_articles: 80
+    track_namespaces:
+    - 0
+storage:
+  backend: local
+  bronze_path: bronze
+  db_path: ./data/observatory.db
+  gold_path: gold
+  local_path: ./data
+  s3_bucket: dead-internet-observatory
+  silver_path: silver
