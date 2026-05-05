@@ -63,6 +63,13 @@ def sync_documents(scored_df: pd.DataFrame):
             df[col] = None
 
     df = df[needed].copy()
+    # Strip NUL bytes from all string columns — Postgres rejects \x00 in literals
+    str_cols = ["doc_id", "source", "category", "domain", "url", "title",
+                "text", "author", "crawl_partition", "ingested_at", "content_hash"]
+    for col in str_cols:
+        df[col] = df[col].apply(
+            lambda v: v.replace('\x00', '') if isinstance(v, str) else v
+        )
     df["text"] = df["text"].apply(
         lambda t: t[:TEXT_MAX] if isinstance(t, str) else t
     )
