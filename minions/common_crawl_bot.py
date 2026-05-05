@@ -164,17 +164,47 @@ class CommonCrawlMinion(BaseMinion):
 
     # ── Entry point ───────────────────────────────────────────────────────────
 
+    def _latest_crawl_id(self) -> Optional[str]:
+        """Fetch the most recent CC crawl ID from the collinfo index."""
+        try:
+            resp = requests.get(
+                "https://index.commoncrawl.org/collinfo.json", timeout=30
+            )
+            resp.raise_for_status()
+            # collinfo returns list sorted newest-first; each entry has 'id' like 'CC-MAIN-2025-13'
+            entries = resp.json()
+            latest = entries[0]["id"].replace("CC-MAIN-", "")
+            self.logger.info(f"Latest CC crawl: {latest}")
+            return latest
+        except Exception as exc:
+            self.logger.warning(f"Could not fetch latest crawl ID: {exc}")
+            return None
+
     def run(self, dry_run: bool = False):
         if not self.config["sources"]["common_crawl"].get("enabled", True):
             self.logger.info("Common Crawl minion disabled — exiting")
             return
 
-        self.logger.info(
-            f"🤖 Common Crawl Minion starting | "
-            f"dates={self.crawl_dates} | max_segments={self.max_segments}"
-        )
+        cfg = self.config["sources"]["common_crawl"]
+        backfill_done = cfg.get("backfill_done", False)
 
-        for crawl_id in self.crawl_dates:
+        if backfill_done:
+            # Ongoing mode: only process the latest crawl snapshot
+            latest = self._latest_crawl_id()
+            if not latest:
+                self.logger.error("Could not determine latest crawl — aborting")
+                return
+            crawl_ids = [latest]
+            self.logger.info(f"🤖 Common Crawl Minion (current mode) | crawl={latest}")
+        else:
+            # Backfill mode: process all configured historical dates
+            crawl_ids = self.crawl_dates
+            self.logger.info(
+                f"🤖 Common Crawl Minion (backfill mode) | "
+                f"dates={crawl_ids} | max_segments={self.max_segments}"
+            )
+
+        for crawl_id in crawl_ids:
             self.logger.info(f"\n── Crawl: CC-MAIN-{crawl_id} ──────────────────")
 
             all_paths = self.get_wet_paths(crawl_id)
