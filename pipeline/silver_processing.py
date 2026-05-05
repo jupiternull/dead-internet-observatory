@@ -13,6 +13,7 @@ import yaml
 
 from detection.ai_content_detector import score_dataframe, corpus_summary
 from analytics.aliveness_index import AlivenessIndexEngine
+from pipeline.supabase_sync import sync_all
 
 
 class SilverToGoldPipeline:
@@ -49,6 +50,9 @@ class SilverToGoldPipeline:
         # Update SQLite index
         self.engine.ingest_scored_df(scored)
         print("[GOLD] ✓ SQLite index updated")
+
+        # Sync to Supabase (no-op if DATABASE_URL not set)
+        sync_all(scored, self.engine)
 
 
 if __name__ == "__main__":
