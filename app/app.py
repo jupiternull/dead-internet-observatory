@@ -284,6 +284,38 @@ div.stSlider {{
     text-align: right;
 }}
 
+/* ── Health bar ── */
+.health-bar-section {{ margin: 0.25rem 0 1rem 0; }}
+.hbar-row {{
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid {P["border_soft"]};
+}}
+.hbar-label {{
+    width: 130px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: {P["ink_light"]};
+    flex-shrink: 0;
+}}
+.hbar-segments {{
+    display: flex;
+    flex: 1;
+    gap: 2px;
+    height: 16px;
+}}
+.hbar-score {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}}
+
 /* ── Methodology box ── */
 .method-box {{
     background: {P["card"]};
@@ -392,11 +424,17 @@ def _demo_timeline() -> pd.DataFrame:
 
 def _demo_sources() -> pd.DataFrame:
     return pd.DataFrame([
-        {"source": "news",        "category": "news",   "mean_score": 63.3, "n_docs": 87},
-        {"source": "wayback",     "category": "web",    "mean_score": 66.1, "n_docs": 15},
-        {"source": "reddit",      "category": "social", "mean_score": 55.3, "n_docs": 496},
-        {"source": "hackernews",  "category": "social", "mean_score": 52.7, "n_docs": 200},
-        {"source": "wikipedia",   "category": "wiki",   "mean_score": 52.5, "n_docs": 18},
+        {"source": "wayback",     "category": "web",          "mean_score": 66.1, "n_docs": 15},
+        {"source": "news",        "category": "news",          "mean_score": 63.3, "n_docs": 87},
+        {"source": "bluesky",     "category": "social",        "mean_score": 58.2, "n_docs": 479},
+        {"source": "hackernews",  "category": "social",        "mean_score": 56.3, "n_docs": 200},
+        {"source": "reddit",      "category": "social",        "mean_score": 55.3, "n_docs": 496},
+        {"source": "fourchan",    "category": "forum",         "mean_score": 54.6, "n_docs": 2637},
+        {"source": "wikipedia",   "category": "wiki",          "mean_score": 52.5, "n_docs": 18},
+        {"source": "steam",       "category": "social",        "mean_score": 52.3, "n_docs": 1594},
+        {"source": "youtube",     "category": "social",        "mean_score": 0.0,  "n_docs": 0},
+        {"source": "linkedin",    "category": "professional",  "mean_score": 0.0,  "n_docs": 0},
+        {"source": "twitter",     "category": "social",        "mean_score": 0.0,  "n_docs": 0},
     ])
 
 
@@ -716,8 +754,18 @@ def render_source_rows(src_df: pd.DataFrame):
         return
     agg = src_df.groupby("source")["mean_score"].mean().sort_values(ascending=False)
     bar_colors = {
-        "news": P["navy"], "wayback": P["forest"], "wikipedia": P["purple"],
-        "reddit": P["gold"], "hackernews": P["rust"], "common_crawl": P["burgundy"],
+        "news":         P["navy"],
+        "wayback":      P["forest"],
+        "wikipedia":    P["purple"],
+        "reddit":       P["gold"],
+        "hackernews":   P["rust"],
+        "common_crawl": P["burgundy"],
+        "bluesky":      "#0085FF",
+        "fourchan":     "#6B8E23",
+        "steam":        "#1B2838",
+        "youtube":      "#CC0000",
+        "linkedin":     "#0A66C2",
+        "twitter":      "#1DA1F2",
     }
     rows_html = ""
     for src, score in agg.items():
@@ -732,6 +780,62 @@ def render_source_rows(src_df: pd.DataFrame):
           <div class="source-score">{score:.1f}</div>
         </div>"""
     st.markdown(rows_html, unsafe_allow_html=True)
+
+
+_HBAR_COLORS = [
+    "#7A0000", "#A83200", "#CC5500", "#D97D00", "#C4A200",
+    "#8DAA00", "#4A9A30", "#1E8855", "#008866", "#00A090",
+]
+
+
+def render_health_bar(label: str, score: float) -> str:
+    filled = max(0, min(10, int(score / 10)))
+    segments = ""
+    for i, color in enumerate(_HBAR_COLORS):
+        if i < filled:
+            seg_style = f"background:{color};opacity:1;"
+        else:
+            seg_style = f"background:{color};opacity:0.12;"
+        br_left  = "3px" if i == 0 else "1px"
+        br_right = "3px" if i == 9 else "1px"
+        segments += (
+            f'<div style="flex:1;height:16px;border-radius:{br_left} {br_right} '
+            f'{br_right} {br_left};{seg_style}"></div>'
+        )
+
+    if score >= 65:
+        score_color = P["forest"]
+    elif score >= 45:
+        score_color = P["gold"]
+    else:
+        score_color = P["burgundy"]
+
+    synth = round(100 - score, 1)
+    score_text = f'{score:.1f}&nbsp;&nbsp;·&nbsp;&nbsp;{synth}% synthetic'
+
+    return (
+        f'<div style="display:flex;align-items:center;gap:0.75rem;padding:0.4rem 0;'
+        f'border-bottom:1px solid {P["border_soft"]}">'
+        f'<div style="width:130px;font-family:Inter,sans-serif;font-size:0.68rem;'
+        f'font-weight:600;letter-spacing:0.12em;text-transform:uppercase;'
+        f'color:{P["ink_light"]};flex-shrink:0">{label}</div>'
+        f'<div style="display:flex;flex:1;gap:2px;height:16px">{segments}</div>'
+        f'<div style="font-family:JetBrains Mono,monospace;font-size:0.72rem;'
+        f'white-space:nowrap;flex-shrink:0;color:{score_color}">{score_text}</div>'
+        f'</div>'
+    )
+
+
+def render_platform_health_bars(src_df: pd.DataFrame) -> str:
+    if src_df.empty:
+        return ""
+    agg = src_df.groupby("source")["mean_score"].mean().sort_values(ascending=False)
+    bars = "".join(
+        render_health_bar(src.replace("_", " ").title(), float(score))
+        for src, score in agg.items()
+        if float(score) > 0
+    )
+    return f'<div class="health-bar-section">{bars}</div>'
 
 
 def render_anomalies(df: pd.DataFrame):
@@ -813,6 +917,11 @@ def main():
         st.markdown(f"<div style='font-family:Crimson Pro,serif;font-size:0.85rem;color:{P['ink_light']};margin-bottom:0.5rem'>Detection signal profile</div>", unsafe_allow_html=True)
         st.plotly_chart(chart_radar(src_df), use_container_width=True,
                         config={"displayModeBar": False})
+
+    # ── Platform Health Bars ─────────────────────────────────────────────────
+    st.markdown('<hr class="section-rule"><div class="section-label">Platform Aliveness Health</div>',
+                unsafe_allow_html=True)
+    st.markdown(render_platform_health_bars(src_df), unsafe_allow_html=True)
 
     # ── Anomalies ─────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Notable Anomalies</div>',

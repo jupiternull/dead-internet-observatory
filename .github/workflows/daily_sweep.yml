@@ -1,0 +1,109 @@
+name: "🌐 Daily Full Sweep"
+
+# Runs all fast minions sequentially each morning, then scores immediately.
+# Common Crawl and Wayback run on their own slower schedules.
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 05:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install requests pyyaml feedparser beautifulsoup4 lxml tqdm \
+                      pandas pyarrow numpy scipy scikit-learn nltk \
+                      huggingface_hub
+
+      - name: Reddit
+        run: python3 -m minions.reddit_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: News
+        run: python3 -m minions.news_crawler_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: HackerNews
+        run: python3 -m minions.hackernews_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Wikipedia
+        run: python3 -m minions.wikipedia_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Bluesky
+        run: python3 -m minions.bluesky_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: 4chan
+        run: python3 -m minions.fourchan_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Steam
+        run: python3 -m minions.steam_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: YouTube
+        run: python3 -m minions.youtube_bot
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+
+      - name: LinkedIn
+        run: python3 -m minions.linkedin_bot
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Twitter/X
+        run: python3 -m minions.twitter_bot
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+
+      - name: Pipeline — Bronze → Silver → Gold → Index
+        run: |
+          python3 -m pipeline.bronze_ingestion
+          python3 -m pipeline.silver_processing
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Push datasets to Hugging Face
+        if: ${{ env.HF_TOKEN != '' }}
+        run: python3 scripts/push_to_hf.py --repo jupiternull/dead-internet-observatory
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+      - name: Commit observatory.db
+        run: |
+          git config user.name  "Observatory Pipeline"
+          git config user.email "bot@dead-internet-observatory.noreply"
+          git add data/observatory.db || true
+          git diff --cached --quiet || git commit -m "chore(index): daily sweep $(date -u +%Y-%m-%d)"
+          git push || echo "Nothing to push"
+        continue-on-error: true

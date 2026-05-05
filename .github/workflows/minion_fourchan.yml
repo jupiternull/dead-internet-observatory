@@ -1,0 +1,38 @@
+name: "🐸 4chan Minion"
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests pyyaml tqdm
+
+      - name: Run 4chan Minion
+        run: python3 -m minions.fourchan_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload bronze data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fourchan-bronze-${{ github.run_id }}
+          path: data/bronze/fourchan/
+          retention-days: 7
+          if-no-files-found: warn

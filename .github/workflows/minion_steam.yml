@@ -1,0 +1,38 @@
+name: "🎮 Steam Minion"
+
+on:
+  schedule:
+    - cron: "30 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests pyyaml tqdm
+
+      - name: Run Steam Minion
+        run: python3 -m minions.steam_bot
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Upload bronze data as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: steam-bronze-${{ github.run_id }}
+          path: data/bronze/steam/
+          retention-days: 7
+          if-no-files-found: warn
