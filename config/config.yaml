@@ -15,6 +15,7 @@ storage:
 sources:
   common_crawl:
     enabled: true
+    backfill_done: false        # flip to true after historical backfill completes
     # Quarterly snapshots — format CC-MAIN-YYYY-WW
     # 2012 uses older single-crawl naming; 2013+ use YYYY-WW weekly format
     crawl_dates:
