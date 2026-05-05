@@ -71,6 +71,7 @@ sources:
       # 2025
       - "2025-06"
       - "2025-21"
+    max_dates_per_run: 5        # dates processed per GitHub Actions run
     max_segments_per_date: 3
     wet_files_per_segment: 5
     max_records_per_wet: 2000
