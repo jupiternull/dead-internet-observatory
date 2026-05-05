@@ -33,7 +33,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install requests pyyaml tqdm
+        run: pip install requests pyyaml tqdm feedparser beautifulsoup4 lxml
 
       - name: Patch config for this run
         if: ${{ github.event.inputs.crawl_date != '' }}

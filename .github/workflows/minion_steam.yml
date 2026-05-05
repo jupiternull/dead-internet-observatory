@@ -22,7 +22,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install requests pyyaml tqdm
+        run: pip install requests pyyaml tqdm feedparser beautifulsoup4 lxml
 
       - name: Run Steam Minion
         run: python3 -m minions.steam_bot

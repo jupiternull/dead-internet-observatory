@@ -22,7 +22,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install requests pyyaml tqdm
+        run: pip install requests pyyaml tqdm feedparser beautifulsoup4 lxml
 
       - name: Run 4chan Minion
         run: python3 -m minions.fourchan_bot

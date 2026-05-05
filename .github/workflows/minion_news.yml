@@ -22,7 +22,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install requests pyyaml feedparser beautifulsoup4 lxml tqdm
+        run: pip install requests pyyaml tqdm feedparser beautifulsoup4 lxml
 
       - name: Run News Crawler Minion
         run: python3 -m minions.news_crawler_bot
