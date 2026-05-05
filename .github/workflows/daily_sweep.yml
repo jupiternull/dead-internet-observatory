@@ -85,12 +85,14 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
 
-      - name: Pipeline — Bronze → Silver → Gold → Index
+      - name: Pipeline — Bronze → Silver → Gold → Index → Supabase
         run: |
+          pip install psycopg2-binary
           python3 -m pipeline.bronze_ingestion
           python3 -m pipeline.silver_processing
         env:
           PYTHONPATH: ${{ github.workspace }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Push datasets to Hugging Face
         if: ${{ env.HF_TOKEN != '' }}

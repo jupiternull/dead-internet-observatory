@@ -40,7 +40,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub
+          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub psycopg2-binary
 
       # ── Download bronze artifacts from all minion runs today ────────────────
       # Each minion uploads its JSONL output as a GitHub Artifact.
@@ -64,6 +64,7 @@ jobs:
         run: python3 -m pipeline.silver_processing
         env:
           PYTHONPATH: ${{ github.workspace }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       # ── Push Parquet datasets to Hugging Face ───────────────────────────────
       - name: Push datasets to Hugging Face
