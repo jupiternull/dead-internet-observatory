@@ -70,6 +70,8 @@ def sync_documents(scored_df: pd.DataFrame):
     df["created_dt"] = df["created_dt"].apply(
         lambda t: t.isoformat() if pd.notna(t) else None
     )
+    # Replace all remaining NaN/NaT/inf with None so psycopg2 sends NULL
+    df = df.where(df.notna(), other=None)
 
     total = 0
     try:
@@ -77,7 +79,10 @@ def sync_documents(scored_df: pd.DataFrame):
             cur = conn.cursor()
             for i in range(0, len(df), BATCH_SIZE):
                 batch = df.iloc[i : i + BATCH_SIZE]
-                rows = [tuple(r) + (now,) for r in batch.itertuples(index=False, name=None)]
+                rows = [
+                    tuple(None if (isinstance(v, float) and v != v) else v for v in r) + (now,)
+                    for r in batch.itertuples(index=False, name=None)
+                ]
                 psycopg2.extras.execute_values(cur, """
                     INSERT INTO documents
                         (doc_id, source, category, domain, url, title, text,

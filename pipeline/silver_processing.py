@@ -1,9 +1,9 @@
 """
 Silver → Gold processing pipeline.
 
-Reads the combined silver Parquet, runs the detection engine on
-every document, and writes scored Parquet + updates the SQLite
-gold layer via AlivenessIndexEngine.
+Incremental: only scores documents not already present in the gold layer.
+New docs are appended to scored.parquet; the SQLite index and Supabase are
+updated with each run's delta.
 """
 
 from pathlib import Path
@@ -34,24 +34,46 @@ class SilverToGoldPipeline:
             return
 
         print(f"[GOLD] Loading {silver_path} …")
-        df = pd.read_parquet(silver_path)
-        print(f"[GOLD] {len(df):,} documents loaded")
+        silver_df = pd.read_parquet(silver_path)
+        print(f"[GOLD] {len(silver_df):,} docs in silver")
 
-        # Score
-        scored = score_dataframe(df)
+        # ── Load already-scored doc_ids ───────────────────────────────────────
+        gold_path = self.gold_root / "scored.parquet"
+        if gold_path.exists():
+            existing_ids = set(pd.read_parquet(gold_path, columns=["doc_id"])["doc_id"])
+            print(f"[GOLD] {len(existing_ids):,} docs already scored")
+        else:
+            existing_ids = set()
+
+        new_df = silver_df[~silver_df["doc_id"].isin(existing_ids)].copy()
+        print(f"[GOLD] {len(new_df):,} new docs to score")
+
+        if new_df.empty:
+            print("[GOLD] Nothing new — index already up to date")
+            return
+
+        # ── Score only the new docs ───────────────────────────────────────────
+        scored = score_dataframe(new_df)
         summary = corpus_summary(scored)
         print(f"[GOLD] Summary: {summary}")
 
-        # Save scored Parquet to gold
-        out = self.gold_root / "scored.parquet"
-        scored.to_parquet(out, index=False, engine="pyarrow")
-        print(f"[GOLD] ✓ Scored Parquet → {out}")
+        # ── Append to gold parquet ────────────────────────────────────────────
+        if gold_path.exists():
+            combined = pd.concat(
+                [pd.read_parquet(gold_path), scored],
+                ignore_index=True,
+            )
+        else:
+            combined = scored
 
-        # Update SQLite index
+        combined.to_parquet(gold_path, index=False, engine="pyarrow")
+        print(f"[GOLD] ✓ scored.parquet now has {len(combined):,} docs")
+
+        # ── Update SQLite index with this run's delta only ────────────────────
         self.engine.ingest_scored_df(scored)
         print("[GOLD] ✓ SQLite index updated")
 
-        # Sync to Supabase (no-op if DATABASE_URL not set)
+        # ── Sync delta to Supabase ────────────────────────────────────────────
         sync_all(scored, self.engine)
 
 
