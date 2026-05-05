@@ -44,19 +44,35 @@ jobs:
           pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub psycopg2-binary
 
       # ── Download bronze artifacts from all minion runs today ────────────────
-      # Each minion uploads its JSONL output as a GitHub Artifact.
-      # We pull them all down before running the pipeline.
+      # Uses gh api directly to find and extract each artifact into the exact
+      # bronze subdirectory that bronze_ingestion.py expects.
       - name: Download minion artifacts
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow_conclusion: success
-          search_artifacts: true
-          name_is_regexp: true
-          name: "^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter)-bronze-"
-          path: data/bronze/
-          if_no_artifact_found: warn
-        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          declare -A DIR_MAP=(
+            [reddit]=reddit [news]=news [wikipedia]=wikipedia
+            [hn]=hackernews [wayback]=wayback [commoncrawl]=common_crawl
+            [bluesky]=bluesky [fourchan]=fourchan [steam]=steam
+            [youtube]=youtube [linkedin]=linkedin [twitter]=twitter
+          )
+          PATTERN='^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter)-bronze-'
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            | jq -r '.artifacts[] | select(.expired == false) | select(.name | test("'"$PATTERN"'")) | "\(.id) \(.name)"' \
+            | while read artifact_id artifact_name; do
+                prefix="${artifact_name%%-bronze-*}"
+                target_dir="${DIR_MAP[$prefix]}"
+                if [ -z "$target_dir" ]; then
+                  echo "Unknown prefix: $prefix, skipping"
+                  continue
+                fi
+                echo "==> $artifact_name → data/bronze/$target_dir/"
+                mkdir -p "data/bronze/$target_dir"
+                gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/artifact.zip
+                unzip -o -q /tmp/artifact.zip -d "data/bronze/$target_dir/"
+              done
+          echo "==> Bronze download complete"
+          find data/bronze -name "*.jsonl" | wc -l | xargs -I{} echo "  {} JSONL files ready"
 
       - name: Run Bronze → Silver pipeline
         run: python3 -m pipeline.bronze_ingestion
