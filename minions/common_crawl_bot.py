@@ -208,14 +208,15 @@ class CommonCrawlMinion(BaseMinion):
             self.logger.info("🤖 Common Crawl Minion — all known crawl dates processed")
             return
 
-        # One crawl date per run — oldest unprocessed first
-        crawl_id = remaining[0]
+        # Process N dates per run — oldest unprocessed first
+        max_per_run = self.config["sources"]["common_crawl"].get("max_dates_per_run", 5)
+        batch_ids = remaining[:max_per_run]
         self.logger.info(
-            f"🤖 Common Crawl Minion | next={crawl_id} | "
-            f"{len(done)}/{len(all_ids)} dates done"
+            f"🤖 Common Crawl Minion | processing {len(batch_ids)} dates | "
+            f"{len(done)}/{len(all_ids)} already done | queue: {batch_ids}"
         )
 
-        for crawl_id in [crawl_id]:
+        for crawl_id in batch_ids:
             self.logger.info(f"\n── Crawl: CC-MAIN-{crawl_id} ──────────────────")
 
             all_paths = self.get_wet_paths(crawl_id)
@@ -246,11 +247,11 @@ class CommonCrawlMinion(BaseMinion):
 
                 self.throttle(3.0)   # respectful delay between large files
 
-        # Mark this date as done and persist progress
+        # Mark this date done after each one (survives partial runs)
         if not dry_run:
             done.add(crawl_id)
             self._save_progress(done)
-            self.logger.info(f"✓ Progress saved — {crawl_id} complete")
+            self.logger.info(f"✓ {crawl_id} complete ({len(done)}/{len(all_ids)})")
 
         self.report_stats()
 
