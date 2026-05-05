@@ -27,7 +27,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install requests pyyaml beautifulsoup4 lxml tqdm
+        run: pip install requests pyyaml tqdm feedparser beautifulsoup4 lxml
 
       - name: Patch snapshot years if overridden
         if: ${{ github.event.inputs.years != '' }}
