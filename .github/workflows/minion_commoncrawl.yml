@@ -2,7 +2,7 @@ name: "🌐 Common Crawl Minion"
 
 on:
   schedule:
-    - cron: "0 1 * * 0"      # Weekly on Sunday at 01:00 UTC (CC files are large)
+    - cron: "0 2 * * *"      # Daily at 02:00 UTC — one crawl date per day
   workflow_dispatch:
     inputs:
       crawl_date:

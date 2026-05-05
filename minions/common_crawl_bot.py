@@ -164,47 +164,58 @@ class CommonCrawlMinion(BaseMinion):
 
     # ── Entry point ───────────────────────────────────────────────────────────
 
-    def _latest_crawl_id(self) -> Optional[str]:
-        """Fetch the most recent CC crawl ID from the collinfo index."""
+    PROGRESS_FILE = "config/cc_progress.json"
+
+    def _all_known_crawl_ids(self) -> List[str]:
+        """Configured historical dates + any newer CC releases not yet in config."""
+        known = list(self.crawl_dates)
         try:
             resp = requests.get(
                 "https://index.commoncrawl.org/collinfo.json", timeout=30
             )
             resp.raise_for_status()
-            # collinfo returns list sorted newest-first; each entry has 'id' like 'CC-MAIN-2025-13'
-            entries = resp.json()
-            latest = entries[0]["id"].replace("CC-MAIN-", "")
-            self.logger.info(f"Latest CC crawl: {latest}")
-            return latest
+            for entry in resp.json():
+                cid = entry["id"].replace("CC-MAIN-", "")
+                if cid not in known:
+                    known.append(cid)
         except Exception as exc:
-            self.logger.warning(f"Could not fetch latest crawl ID: {exc}")
-            return None
+            self.logger.warning(f"Could not fetch collinfo: {exc}")
+        return known
+
+    def _load_progress(self) -> set:
+        import json
+        from pathlib import Path
+        p = Path(self.PROGRESS_FILE)
+        if p.exists():
+            return set(json.loads(p.read_text()))
+        return set()
+
+    def _save_progress(self, done: set):
+        import json
+        from pathlib import Path
+        Path(self.PROGRESS_FILE).write_text(json.dumps(sorted(done), indent=2))
 
     def run(self, dry_run: bool = False):
         if not self.config["sources"]["common_crawl"].get("enabled", True):
             self.logger.info("Common Crawl minion disabled — exiting")
             return
 
-        cfg = self.config["sources"]["common_crawl"]
-        backfill_done = cfg.get("backfill_done", False)
+        all_ids   = self._all_known_crawl_ids()
+        done      = self._load_progress()
+        remaining = [cid for cid in all_ids if cid not in done]
 
-        if backfill_done:
-            # Ongoing mode: only process the latest crawl snapshot
-            latest = self._latest_crawl_id()
-            if not latest:
-                self.logger.error("Could not determine latest crawl — aborting")
-                return
-            crawl_ids = [latest]
-            self.logger.info(f"🤖 Common Crawl Minion (current mode) | crawl={latest}")
-        else:
-            # Backfill mode: process all configured historical dates
-            crawl_ids = self.crawl_dates
-            self.logger.info(
-                f"🤖 Common Crawl Minion (backfill mode) | "
-                f"dates={crawl_ids} | max_segments={self.max_segments}"
-            )
+        if not remaining:
+            self.logger.info("🤖 Common Crawl Minion — all known crawl dates processed")
+            return
 
-        for crawl_id in crawl_ids:
+        # One crawl date per run — oldest unprocessed first
+        crawl_id = remaining[0]
+        self.logger.info(
+            f"🤖 Common Crawl Minion | next={crawl_id} | "
+            f"{len(done)}/{len(all_ids)} dates done"
+        )
+
+        for crawl_id in [crawl_id]:
             self.logger.info(f"\n── Crawl: CC-MAIN-{crawl_id} ──────────────────")
 
             all_paths = self.get_wet_paths(crawl_id)
@@ -234,6 +245,12 @@ class CommonCrawlMinion(BaseMinion):
                     self.stats["processed"] += len(batch)
 
                 self.throttle(3.0)   # respectful delay between large files
+
+        # Mark this date as done and persist progress
+        if not dry_run:
+            done.add(crawl_id)
+            self._save_progress(done)
+            self.logger.info(f"✓ Progress saved — {crawl_id} complete")
 
         self.report_stats()
 
