@@ -21,7 +21,7 @@ CONFIG_PATH = str(ROOT / "config" / "config.yaml")
 DB_PATH     = str(ROOT / "data" / "observatory.db")
 
 try:
-    from analytics.aliveness_index import AlivenessIndexEngine, seed_demo_data
+    from analytics.aliveness_index import AlivenessIndexEngine
     from analytics.anomaly_detector import label_anomalies
     ANALYTICS_OK = True
 except ImportError:
@@ -351,14 +351,7 @@ def get_engine():
         return None
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     try:
-        engine = AlivenessIndexEngine(CONFIG_PATH)
-        if engine.get_meta("demo_seeded") == "true":
-            import sqlite3
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM meta WHERE key='demo_seeded'")
-            conn.commit()
-            conn.close()
-        return engine
+        return AlivenessIndexEngine(CONFIG_PATH)
     except Exception as exc:
         st.error(f"Engine error: {exc}")
         return None
@@ -370,15 +363,12 @@ def load_timeline(days: int = 3000) -> pd.DataFrame:
     if engine:
         try:
             df = engine.get_composite_timeline(days)
-            if df.empty and engine.get_meta("demo_seeded") != "true":
-                seed_demo_data(DB_PATH, CONFIG_PATH)
-                df = engine.get_composite_timeline(days)
             if not df.empty:
                 df["date"] = pd.to_datetime(df["date"])
                 return label_anomalies(df, "aliveness_index")
         except Exception:
             pass
-    return _demo_timeline()
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
@@ -391,7 +381,7 @@ def load_sources() -> pd.DataFrame:
                 return df
         except Exception:
             pass
-    return _demo_sources()
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
@@ -402,40 +392,25 @@ def load_score() -> float:
             return engine.get_current_score()
         except Exception:
             pass
-    return 55.5
+    return 0.0
 
 
-def _demo_timeline() -> pd.DataFrame:
-    rng = np.random.default_rng(42)
-    end = datetime.now(timezone.utc)
-    dates = pd.date_range(end - timedelta(days=730), end, freq="D")
-    n = len(dates)
-    x = np.linspace(0, 1, n)
-    scores = np.clip(78 - 28 * (1 / (1 + np.exp(-7 * (x - 0.6)))) + rng.normal(0, 1.5, n), 20, 92)
-    df = pd.DataFrame({
-        "date": dates,
-        "aliveness_index": scores,
-        "smoothed_index": pd.Series(scores).rolling(7, min_periods=1, center=True).mean().values,
-        "n_docs": rng.integers(500, 3000, n),
-        "anomaly_flag": 0, "anomaly_type": "", "z_score": 0.0, "is_anomaly": False,
-    })
-    return label_anomalies(df, "aliveness_index")
+@st.cache_data(ttl=300)
+def load_signal_means() -> dict:
+    gold_path = ROOT / "data" / "gold" / "scored.parquet"
+    if not gold_path.exists():
+        return {}
+    try:
+        df = pd.read_parquet(gold_path, columns=[
+            "score_ttr", "score_entropy", "score_sentence_variance",
+            "score_burstiness", "score_zipf_deviation", "score_repetition",
+            "score_mtld",
+        ])
+        return {col: round(float(df[col].mean()) * 100, 1) for col in df.columns if col in df}
+    except Exception:
+        return {}
 
 
-def _demo_sources() -> pd.DataFrame:
-    return pd.DataFrame([
-        {"source": "wayback",     "category": "web",          "mean_score": 66.1, "n_docs": 15},
-        {"source": "news",        "category": "news",          "mean_score": 63.3, "n_docs": 87},
-        {"source": "bluesky",     "category": "social",        "mean_score": 58.2, "n_docs": 479},
-        {"source": "hackernews",  "category": "social",        "mean_score": 56.3, "n_docs": 200},
-        {"source": "reddit",      "category": "social",        "mean_score": 55.3, "n_docs": 496},
-        {"source": "fourchan",    "category": "forum",         "mean_score": 54.6, "n_docs": 2637},
-        {"source": "wikipedia",   "category": "wiki",          "mean_score": 52.5, "n_docs": 18},
-        {"source": "steam",       "category": "social",        "mean_score": 52.3, "n_docs": 1594},
-        {"source": "youtube",     "category": "social",        "mean_score": 0.0,  "n_docs": 0},
-        {"source": "linkedin",    "category": "professional",  "mean_score": 0.0,  "n_docs": 0},
-        {"source": "twitter",     "category": "social",        "mean_score": 0.0,  "n_docs": 0},
-    ])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -646,10 +621,20 @@ def chart_projection(df: pd.DataFrame, years: float, accel: float) -> go.Figure:
 def chart_radar(sources_df: pd.DataFrame) -> go.Figure:
     dims = ["Vocabulary\nDiversity", "Sentence\nVariance", "Info\nEntropy",
             "Temporal\nBurstiness", "Zipf\nAlignment", "Non-\nRepetition"]
+    sig_keys = [
+        "score_ttr", "score_sentence_variance", "score_entropy",
+        "score_burstiness", "score_zipf_deviation", "score_repetition",
+    ]
 
-    overall = float(sources_df["mean_score"].mean()) if not sources_df.empty else 55.0
-    rng = np.random.default_rng(int(overall * 100))
-    current = list(np.clip(overall + rng.normal(0, 10, len(dims)), 15, 90))
+    sigs = load_signal_means()
+    if sigs:
+        current = [sigs.get(k, 50.0) for k in sig_keys]
+    elif not sources_df.empty:
+        overall = float(sources_df["mean_score"].mean())
+        current = [overall] * len(dims)
+    else:
+        current = [50.0] * len(dims)
+
     baseline = [68.0] * len(dims)
 
     fig = go.Figure()
@@ -789,15 +774,21 @@ _HBAR_COLORS = [
 
 
 def render_health_bar(label: str, score: float) -> str:
-    filled = max(0, min(10, int(score / 10)))
+    clamped  = max(0.0, min(100.0, score))
+    filled   = int(clamped / 10)          # fully-lit segments
+    frac     = (clamped % 10) / 10        # 0.0–1.0 partial fill for next segment
     segments = ""
     for i, color in enumerate(_HBAR_COLORS):
-        if i < filled:
-            seg_style = f"background:{color};opacity:1;"
-        else:
-            seg_style = f"background:{color};opacity:0.12;"
         br_left  = "3px" if i == 0 else "1px"
         br_right = "3px" if i == 9 else "1px"
+        if i < filled:
+            seg_style = f"background:{color};opacity:1;"
+        elif i == filled and frac > 0:
+            # partial segment: fade between dim and full using the fractional value
+            opacity = round(0.12 + frac * 0.88, 3)
+            seg_style = f"background:{color};opacity:{opacity};"
+        else:
+            seg_style = f"background:{color};opacity:0.12;"
         segments += (
             f'<div style="flex:1;height:16px;border-radius:{br_left} {br_right} '
             f'{br_right} {br_left};{seg_style}"></div>'

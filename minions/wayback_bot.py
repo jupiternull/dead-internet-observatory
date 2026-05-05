@@ -54,8 +54,12 @@ DEFAULT_SENTINEL_URLS = [
     "https://slatestarcodex.com/",
 ]
 
-# Historical snapshot years to sample — bracket the ChatGPT inflection point
-SNAPSHOT_YEARS = [2019, 2021, 2023, 2024, 2025]
+# Full historical coverage from pre-social-media era through present
+SNAPSHOT_YEARS = [
+    2010, 2011, 2012, 2013, 2014, 2015,
+    2016, 2017, 2018, 2019, 2020, 2021,
+    2022, 2023, 2024, 2025,
+]
 
 
 class WaybackMinion(BaseMinion):
