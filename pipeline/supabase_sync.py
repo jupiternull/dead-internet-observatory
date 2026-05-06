@@ -175,6 +175,47 @@ def sync_index(engine):
         conn.close()
 
 
+# ── Read helpers (used by pipeline for incremental scoring) ──────────────────
+
+def get_scored_doc_ids() -> set:
+    """Return the set of doc_ids already scored and stored in Supabase.
+    Used by the pipeline to determine which documents are genuinely new.
+    Returns empty set if DATABASE_URL is unset or connection fails."""
+    conn = _conn()
+    if conn is None:
+        return set()
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT doc_id FROM documents")
+            return {row[0] for row in cur.fetchall()}
+    except Exception as exc:
+        logger.warning(f"[SUPABASE] get_scored_doc_ids failed: {exc}")
+        return set()
+    finally:
+        conn.close()
+
+
+def get_total_doc_count() -> int:
+    """Return the total number of scored documents stored in Supabase.
+    Used by the dashboard to show the true all-time corpus size.
+    Returns 0 if DATABASE_URL is unset or connection fails."""
+    conn = _conn()
+    if conn is None:
+        return 0
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM documents")
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
+    except Exception as exc:
+        logger.warning(f"[SUPABASE] get_total_doc_count failed: {exc}")
+        return 0
+    finally:
+        conn.close()
+
+
 # ── Convenience: run both ─────────────────────────────────────────────────────
 
 def sync_all(scored_df: pd.DataFrame, engine):

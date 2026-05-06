@@ -13,7 +13,7 @@ import yaml
 
 from detection.ai_content_detector import score_dataframe, corpus_summary
 from analytics.aliveness_index import AlivenessIndexEngine
-from pipeline.supabase_sync import sync_all
+from pipeline.supabase_sync import sync_all, get_scored_doc_ids
 
 
 class SilverToGoldPipeline:
@@ -39,11 +39,17 @@ class SilverToGoldPipeline:
 
         # ── Load already-scored doc_ids ───────────────────────────────────────
         gold_path = self.gold_root / "scored.parquet"
-        if gold_path.exists():
-            existing_ids = set(pd.read_parquet(gold_path, columns=["doc_id"])["doc_id"])
-            print(f"[GOLD] {len(existing_ids):,} docs already scored")
+        # Use Supabase as persistent scored-doc registry (survives runner restarts)
+        existing_ids = get_scored_doc_ids()
+        if existing_ids:
+            print(f"[GOLD] {len(existing_ids):,} docs already scored in Supabase — skipping")
         else:
-            existing_ids = set()
+            # Fallback for local dev without DATABASE_URL: check gold parquet
+            if gold_path.exists():
+                existing_ids = set(pd.read_parquet(gold_path, columns=["doc_id"])["doc_id"])
+                print(f"[GOLD] {len(existing_ids):,} docs already scored (local parquet fallback)")
+            else:
+                print("[GOLD] No prior scored docs found — scoring full silver batch")
 
         new_df = silver_df[~silver_df["doc_id"].isin(existing_ids)].copy()
         print(f"[GOLD] {len(new_df):,} new docs to score")
