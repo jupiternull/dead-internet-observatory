@@ -397,6 +397,13 @@ def load_score() -> float:
 
 @st.cache_data(ttl=300)
 def load_total_docs() -> int:
+    try:
+        from pipeline.supabase_sync import get_total_doc_count
+        total = get_total_doc_count()
+        if total > 0:
+            return total
+    except Exception:
+        pass
     engine = get_engine()
     if engine:
         try:
@@ -893,37 +900,31 @@ def main():
     with s_col:
         render_stats(tl_df, score, src_df, load_total_docs())
 
+    # ── Platform Health Bars ─────────────────────────────────────────────────
+    st.markdown('<hr class="section-rule"><div class="section-label">Platform Aliveness Health</div>',
+                unsafe_allow_html=True)
+    st.markdown(render_platform_health_bars(src_df), unsafe_allow_html=True)
+
     # ── Timeline ──────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Index Timeline</div>',
                 unsafe_allow_html=True)
 
     rng_col, _ = st.columns([2, 6])
     with rng_col:
-        window = st.selectbox("Window", ["All data", "2 years", "1 year", "90 days"],
+        window = st.selectbox("Window", ["All data", "10 years", "5 years", "2 years", "1 year", "90 days", "30 days"],
                               index=0, label_visibility="collapsed")
-    day_map = {"All data": 9999, "2 years": 730, "1 year": 365, "90 days": 90}
+    day_map = {"All data": 9999, "10 years": 3650, "5 years": 1825, "2 years": 730, "1 year": 365, "90 days": 90, "30 days": 30}
     cutoff = tl_df["date"].max() - timedelta(days=day_map[window]) if day_map[window] < 9999 else tl_df["date"].min()
     view = tl_df[tl_df["date"] >= cutoff]
     st.plotly_chart(chart_timeline(view), use_container_width=True,
                     config={"displayModeBar": False})
 
-    # ── Source Breakdown + Radar ───────────────────────────────────────────────
-    st.markdown('<hr class="section-rule"><div class="section-label">Source Analysis</div>',
+    # ── Signal Radar ──────────────────────────────────────────────────────────
+    st.markdown('<hr class="section-rule"><div class="section-label">Detection Signal Profile</div>',
                 unsafe_allow_html=True)
-
-    b_col, r_col = st.columns([1, 1])
-    with b_col:
-        st.markdown(f"<div style='font-family:Crimson Pro,serif;font-size:0.85rem;color:{P['ink_light']};margin-bottom:0.75rem'>Aliveness by source corpus</div>", unsafe_allow_html=True)
-        render_source_rows(src_df)
-    with r_col:
-        st.markdown(f"<div style='font-family:Crimson Pro,serif;font-size:0.85rem;color:{P['ink_light']};margin-bottom:0.5rem'>Detection signal profile</div>", unsafe_allow_html=True)
-        st.plotly_chart(chart_radar(src_df), use_container_width=True,
-                        config={"displayModeBar": False})
-
-    # ── Platform Health Bars ─────────────────────────────────────────────────
-    st.markdown('<hr class="section-rule"><div class="section-label">Platform Aliveness Health</div>',
-                unsafe_allow_html=True)
-    st.markdown(render_platform_health_bars(src_df), unsafe_allow_html=True)
+    st.markdown(f"<div style='font-family:Crimson Pro,serif;font-size:0.85rem;color:{P['ink_light']};margin-bottom:0.5rem'>Detection signal profile vs. 2019 baseline</div>", unsafe_allow_html=True)
+    st.plotly_chart(chart_radar(src_df), use_container_width=True,
+                    config={"displayModeBar": False})
 
     # ── Anomalies ─────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Notable Anomalies</div>',
@@ -951,6 +952,25 @@ def main():
     # ── Simulator ─────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Projection Simulator</div>',
                 unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <style>
+    .stSlider [data-baseweb="slider"] [role="slider"] {{
+        background-color: {P["gold_light"]} !important;
+        border: 2px solid {P["navy"]} !important;
+    }}
+    .stSlider [data-baseweb="slider"] div[data-testid="stTickBarMin"],
+    .stSlider [data-baseweb="slider"] div[data-testid="stTickBarMax"] {{
+        color: {P["ink_light"]} !important;
+    }}
+    .stSlider [data-baseweb="slider"] div[class*="Bar"] {{
+        background: {P["navy"]} !important;
+    }}
+    .stSlider [data-baseweb="slider"] div[class*="InnerTrack"] {{
+        background: {P["gold"]} !important;
+    }}
+    </style>
+    """, unsafe_allow_html=True)
 
     ctrl_col, proj_col = st.columns([1, 3])
     with ctrl_col:
