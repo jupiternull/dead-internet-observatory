@@ -396,6 +396,17 @@ def load_score() -> float:
 
 
 @st.cache_data(ttl=300)
+def load_total_docs() -> int:
+    engine = get_engine()
+    if engine:
+        try:
+            return engine.get_total_docs()
+        except Exception:
+            pass
+    return 0
+
+
+@st.cache_data(ttl=300)
 def load_signal_means() -> dict:
     gold_path = ROOT / "data" / "gold" / "scored.parquet"
     if not gold_path.exists():
@@ -687,7 +698,7 @@ def render_masthead(score: float):
     """, unsafe_allow_html=True)
 
 
-def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame):
+def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame, total_docs: int = 0):
     delta_30 = ""
     delta_color = P["ink_light"]
     if len(df) >= 2:
@@ -697,7 +708,7 @@ def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame):
             delta_30 = f"{'↑' if d > 0 else '↓'} {abs(d):.1f} vs 30 days prior"
             delta_color = P["forest"] if d > 0 else P["burgundy"]
 
-    n_docs = int(df["n_docs"].sum()) if "n_docs" in df.columns and not df.empty else 816
+    n_docs = total_docs or (int(df["n_docs"].sum()) if "n_docs" in df.columns and not df.empty else 0)
     n_docs_str = f"{n_docs/1e6:.2f}M" if n_docs >= 1e6 else f"{n_docs:,}"
     synth = round(100 - score, 1)
     n_sources = len(src_df["source"].unique()) if not src_df.empty else 5
@@ -880,7 +891,7 @@ def main():
         st.plotly_chart(chart_gauge(score), use_container_width=True,
                         config={"displayModeBar": False})
     with s_col:
-        render_stats(tl_df, score, src_df)
+        render_stats(tl_df, score, src_df, load_total_docs())
 
     # ── Timeline ──────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Index Timeline</div>',

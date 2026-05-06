@@ -44,6 +44,16 @@ def _make_doc_id(source: str, identifier: str, text_prefix: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
 
+def _unix_to_iso(ts) -> Optional[str]:
+    """Convert a Unix timestamp (int, float, or numeric string) to ISO 8601 UTC.
+    Returns None on failure so pd.to_datetime(errors='coerce') yields NaT
+    rather than silently falling back to today's date."""
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError):
+        return None
+
+
 # ── Record normalisers per source ─────────────────────────────────────────────
 
 def _normalise_common_crawl(raw: Dict, partition: str) -> Optional[Dict]:
@@ -261,7 +271,7 @@ def _normalise_fourchan(raw: Dict, partition: str) -> Optional[Dict]:
         "text": text,
         "text_length": len(text),
         "author": raw.get("country", ""),
-        "created_dt": str(raw.get("timestamp", "")),
+        "created_dt": _unix_to_iso(raw.get("timestamp")),
         "crawl_partition": partition,
         "ingested_at": raw.get("_ingested_at", ""),
         "content_hash": "",
@@ -282,7 +292,7 @@ def _normalise_steam(raw: Dict, partition: str) -> Optional[Dict]:
         "text": text,
         "text_length": len(text),
         "author": raw.get("author_steam_id", ""),
-        "created_dt": str(raw.get("timestamp_created", "")),
+        "created_dt": _unix_to_iso(raw.get("timestamp_created")),
         "crawl_partition": partition,
         "ingested_at": raw.get("_ingested_at", ""),
         "content_hash": raw.get("review_id", ""),
