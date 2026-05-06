@@ -137,8 +137,15 @@ class AlivenessIndexEngine:
                 if scores.empty:
                     continue
                 conn.execute(
-                    """INSERT OR REPLACE INTO daily_index VALUES
-                       (?,?,?,?,?,?,?,?,?,?)""",
+                    """INSERT INTO daily_index VALUES (?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(date, source, category) DO UPDATE SET
+                           n_docs          = MAX(daily_index.n_docs, excluded.n_docs),
+                           mean_score      = excluded.mean_score,
+                           median_score    = excluded.median_score,
+                           std_score       = excluded.std_score,
+                           pct_below_50    = excluded.pct_below_50,
+                           bot_fraction    = excluded.bot_fraction,
+                           aliveness_index = excluded.aliveness_index""",
                     (
                         str(date), source, category,
                         len(group),
@@ -160,7 +167,11 @@ class AlivenessIndexEngine:
                         continue
                     cat = group["category"].iloc[0] if "category" in group.columns else ""
                     conn.execute(
-                        "INSERT OR REPLACE INTO domain_scores VALUES (?,?,?,?,?)",
+                        """INSERT INTO domain_scores VALUES (?,?,?,?,?)
+                           ON CONFLICT(date, domain) DO UPDATE SET
+                               category   = excluded.category,
+                               mean_score = excluded.mean_score,
+                               n_docs     = MAX(domain_scores.n_docs, excluded.n_docs)""",
                         (str(date), domain, cat,
                          round(float(scores.mean()), 3), len(group))
                     )
@@ -221,7 +232,13 @@ class AlivenessIndexEngine:
         with self._conn() as conn:
             for _, row in composite.iterrows():
                 conn.execute(
-                    "INSERT OR REPLACE INTO composite_index VALUES (?,?,?,?,?,?)",
+                    """INSERT INTO composite_index VALUES (?,?,?,?,?,?)
+                       ON CONFLICT(date) DO UPDATE SET
+                           aliveness_index = excluded.aliveness_index,
+                           smoothed_index  = excluded.smoothed_index,
+                           n_docs          = MAX(composite_index.n_docs, excluded.n_docs),
+                           anomaly_flag    = excluded.anomaly_flag,
+                           anomaly_reason  = excluded.anomaly_reason""",
                     (
                         str(row["date"].date()),
                         round(float(row["aliveness_index"]), 3),
@@ -271,6 +288,13 @@ class AlivenessIndexEngine:
                 "SELECT smoothed_index FROM composite_index ORDER BY date DESC LIMIT 1"
             ).fetchone()
         return float(row["smoothed_index"]) if row else self.config["app"]["current_aliveness"]
+
+    def get_total_docs(self) -> int:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(n_docs), 0) FROM daily_index"
+            ).fetchone()
+        return int(row[0])
 
     def get_meta(self, key: str) -> Optional[str]:
         with self._conn() as conn:
