@@ -689,6 +689,53 @@ def chart_radar(sources_df: pd.DataFrame) -> go.Figure:
 #  LAYOUT
 # ══════════════════════════════════════════════════════════════════════════════
 
+def render_overall_healthbar(score: float) -> str:
+    if score >= 65:
+        color, status = P["forest"],   "Predominantly Human"
+    elif score >= 50:
+        color, status = P["gold"],     "Mixed — Significant Synthetic Presence"
+    elif score >= 35:
+        color, status = P["rust"],     "Synthetic Majority Detected"
+    else:
+        color, status = P["burgundy"], "Critical — Internet Largely Synthetic"
+
+    n_segs = 20
+    filled = int(score / 100 * n_segs)
+    frac   = (score / 100 * n_segs) - filled
+    segments = ""
+    for i in range(n_segs):
+        br_left  = "4px" if i == 0 else "2px"
+        br_right = "4px" if i == n_segs - 1 else "2px"
+        if i < filled:
+            seg_style = f"background:{color};opacity:1;"
+        elif i == filled and frac > 0:
+            opacity = round(0.12 + frac * 0.88, 3)
+            seg_style = f"background:{color};opacity:{opacity};"
+        else:
+            seg_style = f"background:{color};opacity:0.12;"
+        segments += (
+            f'<div style="flex:1;height:28px;border-radius:{br_left} {br_right} '
+            f'{br_right} {br_left};{seg_style};transition:opacity 0.3s"></div>'
+        )
+
+    synth = round(100 - score, 1)
+    return f"""
+<div style="margin:1.5rem 0 1rem">
+  <div style="display:flex;align-items:baseline;gap:0.75rem;margin-bottom:0.5rem">
+    <span style="font-family:JetBrains Mono,monospace;font-size:2.8rem;font-weight:600;color:{color};line-height:1">{score:.1f}</span>
+    <span style="font-family:Inter,sans-serif;font-size:0.72rem;letter-spacing:0.12em;text-transform:uppercase;color:{P['ink_light']}">{status}</span>
+  </div>
+  <div style="display:flex;gap:3px">{segments}</div>
+  <div style="display:flex;justify-content:space-between;margin-top:0.35rem;font-family:Inter,sans-serif;font-size:0.65rem;color:{P['ink_light']};letter-spacing:0.08em">
+    <span>0 — Dead Internet</span>
+    <span style="color:{P['ink_light']}">▲ 68.0 est. 2019 baseline</span>
+    <span>100 — Fully Human</span>
+  </div>
+  <div style="margin-top:0.4rem;font-family:Inter,sans-serif;font-size:0.7rem;color:{P['ink_light']}">{synth}% of sampled content estimated synthetic</div>
+</div>
+"""
+
+
 def render_masthead(score: float):
     now = datetime.now(timezone.utc)
     st.markdown(f"""
@@ -718,7 +765,6 @@ def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame, total_doc
     n_docs = total_docs or (int(df["n_docs"].sum()) if "n_docs" in df.columns and not df.empty else 0)
     n_docs_str = f"{n_docs/1e6:.2f}M" if n_docs >= 1e6 else f"{n_docs:,}"
     synth = round(100 - score, 1)
-    n_sources = len(src_df["source"].unique()) if not src_df.empty else 5
     min_score = round(float(df["smoothed_index"].min()), 1) if not df.empty else 0
 
     st.markdown(f"""
@@ -737,11 +783,6 @@ def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame, total_doc
         <div class="stat-number gold">{min_score}</div>
         <div class="stat-label">Observed Low</div>
         <div class="stat-note">lowest recorded index value</div>
-      </div>
-      <div class="stat-card forest">
-        <div class="stat-number forest">{n_sources}</div>
-        <div class="stat-label">Active Sources</div>
-        <div class="stat-note">CC · Reddit · News · HN · Wiki · Wayback</div>
       </div>
       <div class="stat-card purple">
         <div class="stat-number purple">{n_docs_str}</div>
@@ -892,22 +933,43 @@ def main():
     # ── Masthead ──────────────────────────────────────────────────────────────
     render_masthead(score)
 
-    # ── Gauge + Stats ─────────────────────────────────────────────────────────
-    g_col, s_col = st.columns([1, 2])
-    with g_col:
-        st.plotly_chart(chart_gauge(score), use_container_width=True,
-                        config={"displayModeBar": False})
-    with s_col:
-        render_stats(tl_df, score, src_df, load_total_docs())
+    # ── Lede ─────────────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:1.05rem;
+              color:{P['ink_mid']};max-width:640px;margin:0.25rem 0 1.5rem;line-height:1.65">
+      A growing share of what you read online was not written by a person.
+      This index tracks how much.
+    </p>
+    """, unsafe_allow_html=True)
+
+    # ── Overall Healthbar ─────────────────────────────────────────────────────
+    st.markdown(render_overall_healthbar(score), unsafe_allow_html=True)
+
+    # ── Stats ─────────────────────────────────────────────────────────────────
+    render_stats(tl_df, score, src_df, load_total_docs())
 
     # ── Platform Health Bars ─────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Platform Aliveness Health</div>',
                 unsafe_allow_html=True)
+    st.markdown(f"""
+    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
+              color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
+      The decline is not uniform. Some platforms retain stronger human signal than others.
+      The bars below show each source's current aliveness score relative to the 0–100 index.
+    </p>
+    """, unsafe_allow_html=True)
     st.markdown(render_platform_health_bars(src_df), unsafe_allow_html=True)
 
     # ── Timeline ──────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Index Timeline</div>',
                 unsafe_allow_html=True)
+    st.markdown(f"""
+    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
+              color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
+      The index has been tracked across twelve platforms since 2012.
+      The sharpest drop begins in late 2023, following the mass deployment of instruction-tuned language models.
+    </p>
+    """, unsafe_allow_html=True)
 
     rng_col, _ = st.columns([2, 6])
     with rng_col:
@@ -929,6 +991,13 @@ def main():
     # ── Anomalies ─────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Notable Anomalies</div>',
                 unsafe_allow_html=True)
+    st.markdown(f"""
+    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
+              color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
+      Certain events leave visible marks in the index. These are the moments where the signal broke from its trend,
+      whether from a sudden content flood, a platform policy change, or a brief recovery.
+    </p>
+    """, unsafe_allow_html=True)
 
     a_col, m_col = st.columns([3, 2])
     with a_col:
@@ -952,6 +1021,13 @@ def main():
     # ── Simulator ─────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Projection Simulator</div>',
                 unsafe_allow_html=True)
+    st.markdown(f"""
+    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
+              color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
+      The trajectory is not fixed. Adjust the parameters below to model what intervention,
+      acceleration, or regulation would mean for the index over the next several years.
+    </p>
+    """, unsafe_allow_html=True)
 
     st.markdown(f"""
     <style>
@@ -1010,7 +1086,9 @@ def main():
         MTLD Lexical Diversity (12%) · Zipf Law Alignment (10%)<br><br>
 
         <b>Sources:</b> Common Crawl WET extracts · Reddit public JSON API · RSS news feeds ·
-        Wikipedia API · Hacker News via Algolia · Internet Archive Wayback Machine (longitudinal sentinel tracking)<br><br>
+        Wikipedia API · Hacker News via Algolia · Internet Archive Wayback Machine ·
+        Bluesky public firehose · 4chan public API · Steam review API ·
+        YouTube public data · LinkedIn public posts · Twitter/X public data<br><br>
 
         <b>Data architecture:</b> Bronze (raw JSONL via GitHub Artifacts) → Silver (normalised Parquet) →
         Gold (scored Parquet + SQLite index). All source code and data at
