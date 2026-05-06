@@ -938,7 +938,7 @@ def main():
     <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:1.05rem;
               color:{P['ink_mid']};max-width:640px;margin:0.25rem 0 1.5rem;line-height:1.65">
       A growing share of what you read online was not written by a person.
-      This index tracks how much.
+      We deploy bots that continuously scrape the web and keep this index current.
     </p>
     """, unsafe_allow_html=True)
 
