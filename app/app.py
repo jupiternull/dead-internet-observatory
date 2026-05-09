@@ -13,19 +13,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import psycopg2
 import streamlit as st
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
-CONFIG_PATH = str(ROOT / "config" / "config.yaml")
-DB_PATH     = str(ROOT / "data" / "observatory.db")
 
 try:
-    from analytics.aliveness_index import AlivenessIndexEngine
     from analytics.anomaly_detector import label_anomalies
-    ANALYTICS_OK = True
 except ImportError:
-    ANALYTICS_OK = False
+    def label_anomalies(df, col):  # noqa: E302
+        return df
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -345,97 +343,98 @@ div.stSlider {{
 #  DATA
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_resource(ttl=3600)
-def get_engine():
-    if not ANALYTICS_OK:
+def _db_conn():
+    """Return a psycopg2 connection using DATABASE_URL, or None if not configured."""
+    url = os.environ.get("DATABASE_URL", "")
+    if not url:
         return None
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     try:
-        return AlivenessIndexEngine(CONFIG_PATH)
-    except Exception as exc:
-        st.error(f"Engine error: {exc}")
+        return psycopg2.connect(url)
+    except Exception:
         return None
 
 
 @st.cache_data(ttl=300)
 def load_timeline(days: int = 3000) -> pd.DataFrame:
-    engine = get_engine()
-    if engine:
+    conn = _db_conn()
+    if conn is None:
+        return pd.DataFrame()
+    try:
+        df = pd.read_sql_query(
+            f"SELECT * FROM composite_index WHERE date >= NOW() - INTERVAL '{days} days' ORDER BY date",
+            conn,
+        )
+        conn.close()
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"])
+            return label_anomalies(df, "aliveness_index")
+        return pd.DataFrame()
+    except Exception:
         try:
-            df = engine.get_composite_timeline(days)
-            if not df.empty:
-                df["date"] = pd.to_datetime(df["date"])
-                return label_anomalies(df, "aliveness_index")
+            conn.close()
         except Exception:
             pass
-    return pd.DataFrame()
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
 def load_sources() -> pd.DataFrame:
-    engine = get_engine()
-    if engine:
+    conn = _db_conn()
+    if conn is None:
+        return pd.DataFrame()
+    try:
+        df = pd.read_sql_query("SELECT * FROM daily_index ORDER BY date DESC", conn)
+        conn.close()
+        return df
+    except Exception:
         try:
-            df = engine.get_source_breakdown()
-            if not df.empty:
-                return df
+            conn.close()
         except Exception:
             pass
-    return pd.DataFrame()
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
 def load_score() -> float:
-    engine = get_engine()
-    if engine:
+    conn = _db_conn()
+    if conn is None:
+        return 0.0
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT smoothed_index FROM composite_index ORDER BY date DESC LIMIT 1")
+        row = cur.fetchone()
+        conn.close()
+        return float(row[0]) if row else 0.0
+    except Exception:
         try:
-            return engine.get_current_score()
+            conn.close()
         except Exception:
             pass
-    return 0.0
+        return 0.0
 
 
 @st.cache_data(ttl=300)
 def load_total_docs() -> int:
+    conn = _db_conn()
+    if conn is None:
+        return 0
     try:
-        from pipeline.supabase_sync import get_total_doc_count
-        total = get_total_doc_count()
-        if total > 0:
-            return total
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM meta WHERE key = 'total_scored_count'")
+        row = cur.fetchone()
+        conn.close()
+        return int(row[0]) if row else 0
     except Exception:
-        pass
-    engine = get_engine()
-    if engine:
         try:
-            return engine.get_total_docs()
+            conn.close()
         except Exception:
             pass
-    return 0
+        return 0
 
 
 @st.cache_data(ttl=300)
 def load_platform_trends() -> pd.DataFrame:
-    import sqlite3
-    if not Path(DB_PATH).exists():
-        return pd.DataFrame()
-    try:
-        con = sqlite3.connect(DB_PATH)
-        df = pd.read_sql_query(
-            """
-            SELECT date, source, aliveness_index
-            FROM daily_index
-            WHERE source IN ('reddit','hackernews','bluesky','youtube','fourchan','steam')
-              AND date >= date('now', '-180 days')
-            ORDER BY date ASC
-            """,
-            con,
-        )
-        con.close()
-        if not df.empty:
-            df["date"] = pd.to_datetime(df["date"])
-        return df
-    except Exception:
-        return pd.DataFrame()
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
