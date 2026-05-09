@@ -374,14 +374,10 @@ def load_timeline(days: int = 3000) -> pd.DataFrame:
         df = pd.DataFrame(data)
         if not df.empty:
             df["date"] = pd.to_datetime(df["date"])
-            # Drop near-empty days (single-source outliers distort the composite)
-            df = df[df["n_docs"] >= 10].reset_index(drop=True)
-            # Time-based 30-day calendar rolling — behaves consistently whether data
-            # is dense (recent daily runs) or sparse (CC backfill, one point per month)
-            df_ts = df.set_index("date")["aliveness_index"]
-            fwd = df_ts.rolling("15D", min_periods=1).mean()
-            bwd = df_ts[::-1].rolling("15D", min_periods=1).mean()[::-1]
-            df["smoothed_index"] = ((fwd + bwd) / 2).round(1).values
+            # Drop days with too few docs — CC backfill years that haven't
+            # accumulated enough data yet (1-5 docs) produce meaningless scores
+            # and create noise between the solid 2013-2014 and 2025-2026 clusters
+            df = df[df["n_docs"] >= 20].reset_index(drop=True)
             return label_anomalies(df, "aliveness_index")
         return df
     except Exception:
@@ -1060,7 +1056,7 @@ def main():
 
     rng_col, _ = st.columns([2, 6])
     with rng_col:
-        window = st.selectbox("Window", ["All data", "10 years", "5 years", "2 years", "1 year", "90 days", "30 days"],
+        window = st.selectbox("Window", ["1 year", "90 days", "30 days", "2 years", "All data"],
                               index=0, label_visibility="collapsed")
     day_map = {"All data": 9999, "10 years": 3650, "5 years": 1825, "2 years": 730, "1 year": 365, "90 days": 90, "30 days": 30}
     cutoff = tl_df["date"].max() - timedelta(days=day_map[window]) if day_map[window] < 9999 else tl_df["date"].min()
