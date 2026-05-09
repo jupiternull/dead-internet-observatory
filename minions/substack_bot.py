@@ -1,8 +1,8 @@
 """
-Substack Minion — harvests posts from curated Substack publications via RSS.
+Substack Minion — harvests posts from curated Substack publications.
 
-Parses each publication's feed at https://{slug}.substack.com/feed, strips
-HTML from the post body, and saves records to the bronze layer.
+Uses the undocumented but public JSON API at /{slug}.substack.com/api/v1/posts
+instead of RSS feeds, which Substack blocks from server IP ranges (403).
 """
 
 import hashlib
@@ -10,7 +10,6 @@ import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-import feedparser
 import requests
 from bs4 import BeautifulSoup
 
@@ -90,70 +89,56 @@ class SubstackBot(BaseMinion):
             return content_list[0].get("value", "")
         return entry.get("summary", "") or ""
 
-    # ── Feed parsing ──────────────────────────────────────────────────────────
+    # ── JSON API ──────────────────────────────────────────────────────────────
 
-    def _parse_publication(self, slug: str) -> List[Dict]:
-        feed_url = f"https://{slug}.substack.com/feed"
-        self.logger.info(f"  Fetching {feed_url}")
-
+    def _fetch_publication(self, slug: str) -> List[Dict]:
+        api_url = f"https://{slug}.substack.com/api/v1/posts?limit=25&offset=0"
+        self.logger.info(f"  Fetching {slug}")
         try:
-            # feedparser accepts a URL but also respects a pre-fetched response;
-            # pass the URL directly and let feedparser handle HTTP.
-            feed = feedparser.parse(
-                feed_url,
-                request_headers=self.HEADERS,
-            )
+            resp = self.session.get(api_url, timeout=20)
+            if resp.status_code in (403, 404):
+                self.logger.warning(f"  [{slug}] HTTP {resp.status_code} — skipping")
+                self.stats["skipped"] += 1
+                return []
+            resp.raise_for_status()
+            posts = resp.json()
         except Exception as exc:
-            self.logger.warning(f"  [{slug}] Feed parse exception: {exc}")
+            self.logger.warning(f"  [{slug}] Failed: {exc}")
             self.stats["errors"] += 1
             return []
 
-        status = getattr(feed, "status", 200)
-        if status in (403, 404):
-            self.logger.warning(f"  [{slug}] HTTP {status} — skipping")
-            self.stats["skipped"] += 1
-            return []
-        if status not in range(200, 400):
-            self.logger.warning(f"  [{slug}] HTTP {status} — skipping")
-            self.stats["errors"] += 1
-            return []
-
-        entries = feed.get("entries", [])
-        self.logger.info(f"  [{slug}] {len(entries)} entries found")
-        self.stats["fetched"] += len(entries)
+        self.logger.info(f"  [{slug}] {len(posts)} posts")
+        self.stats["fetched"] += len(posts)
 
         records: List[Dict] = []
-        for entry in entries:
-            url = entry.get("link", "").strip()
+        for post in posts:
+            url = post.get("canonical_url") or post.get("url", "")
             if not url:
                 self.stats["skipped"] += 1
                 continue
 
-            raw_html = self._get_raw_text(entry)
-            text = self._strip_html(raw_html).strip()
-
+            raw_html = post.get("body_html") or post.get("subtitle") or ""
+            text = self._strip_html(raw_html).strip() if raw_html else ""
+            if not text:
+                text = (post.get("subtitle") or "").strip()
             if len(text) < MIN_TEXT_LEN:
                 self.stats["skipped"] += 1
                 continue
 
-            title = entry.get("title", "").strip()
-            author = (
-                entry.get("author", "")
-                or entry.get("author_detail", {}).get("name", "")
-            ).strip()
-            published_at = self._parse_date(entry)
-            word_count = len(text.split())
+            author = ""
+            if post.get("publishedBylines"):
+                author = post["publishedBylines"][0].get("name", "")
 
             records.append({
-                "post_id": self._post_id(url),
-                "publication": slug,
-                "title": title,
-                "text": text[:TEXT_TRUNCATE],
-                "author": author,
-                "published_at": published_at,
-                "url": url,
-                "word_count": word_count,
-                "category": "blog",
+                "post_id":      self._post_id(url),
+                "publication":  slug,
+                "title":        (post.get("title") or "").strip(),
+                "text":         text[:TEXT_TRUNCATE],
+                "author":       author,
+                "published_at": post.get("post_date") or post.get("updated_at", ""),
+                "url":          url,
+                "word_count":   len(text.split()),
+                "category":     "blog",
             })
             self.stats["processed"] += 1
 
@@ -166,7 +151,7 @@ class SubstackBot(BaseMinion):
         all_records: List[Dict] = []
 
         for slug in SUBSTACKS:
-            records = self._parse_publication(slug)
+            records = self._fetch_publication(slug)
             all_records.extend(records)
             self.throttle(1.0)
 
