@@ -15,6 +15,7 @@ on:
       - "📺 YouTube Minion"
       - "💼 LinkedIn Minion"
       - "🐦 Twitter/X Minion"
+      - "🌐 Daily Full Sweep"
     types: [completed]
   schedule:
     - cron: "0 6 * * *"       # Daily at 06:00 UTC — catches all overnight minions
@@ -23,6 +24,10 @@ on:
 permissions:
   contents: write
   actions: read
+
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
 
 jobs:
   process:
@@ -56,11 +61,18 @@ jobs:
             [bluesky]=bluesky [fourchan]=fourchan [steam]=steam
             [youtube]=youtube [linkedin]=linkedin [twitter]=twitter
           )
-          PATTERN='^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter)-bronze-'
+          PATTERN='^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter|sweep)-bronze-'
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
             | jq -r '.artifacts[] | select(.expired == false) | select(.name | test("'"$PATTERN"'")) | "\(.id) \(.name)"' \
             | while read artifact_id artifact_name; do
                 prefix="${artifact_name%%-bronze-*}"
+                if [ "$prefix" = "sweep" ]; then
+                  echo "==> $artifact_name → data/bronze/ (sweep, all sources)"
+                  mkdir -p "data/bronze"
+                  gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/artifact.zip
+                  unzip -o -q /tmp/artifact.zip -d "data/bronze/"
+                  continue
+                fi
                 target_dir="${DIR_MAP[$prefix]}"
                 if [ -z "$target_dir" ]; then
                   echo "Unknown prefix: $prefix, skipping"
