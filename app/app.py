@@ -374,6 +374,15 @@ def load_timeline(days: int = 3000) -> pd.DataFrame:
         df = pd.DataFrame(data)
         if not df.empty:
             df["date"] = pd.to_datetime(df["date"])
+            # Drop near-empty days (single-source outliers score near 0 and distort the chart)
+            df = df[df["n_docs"] >= 10].reset_index(drop=True)
+            # Re-derive smoothed_index with a 21-day window so it reflects current settings
+            df["smoothed_index"] = (
+                df["aliveness_index"]
+                .rolling(window=21, min_periods=5, center=True)
+                .mean()
+                .round(1)
+            )
             return label_anomalies(df, "aliveness_index")
         return df
     except Exception:

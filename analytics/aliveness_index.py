@@ -74,10 +74,20 @@ CREATE TABLE IF NOT EXISTS meta (
 class AlivenessIndexEngine:
 
     DEFAULT_SOURCE_WEIGHTS = {
-        "common_crawl": 0.35,
-        "reddit": 0.25,
-        "news": 0.25,
-        "wikipedia": 0.15,
+        "common_crawl":  0.30,
+        "reddit":        0.15,
+        "news":          0.10,
+        "wikipedia":     0.10,
+        "wayback":       0.08,
+        "hackernews":    0.06,
+        "bluesky":       0.05,
+        "youtube":       0.05,
+        "fourchan":      0.04,
+        "steam":         0.03,
+        "mastodon":      0.03,
+        "stackoverflow": 0.03,
+        "linkedin":      0.02,
+        "github":        0.02,
     }
 
     def __init__(self, config_path: str = "config/config.yaml"):
@@ -200,6 +210,8 @@ class AlivenessIndexEngine:
                 total_weight += w
             return weighted_sum / total_weight if total_weight > 0 else 50.0
 
+        n_docs_series = df.groupby("date")["n_docs"].sum()
+
         composite = (
             df.groupby("date")
             .apply(weighted_mean)
@@ -208,8 +220,10 @@ class AlivenessIndexEngine:
             .sort_values("date")
         )
 
-        n_docs_series = df.groupby("date")["n_docs"].sum()
         composite["n_docs"] = composite["date"].map(n_docs_series).fillna(0).apply(lambda x: int(float(x)))
+
+        # Drop days with too few docs — single-doc outliers distort the composite
+        composite = composite[composite["n_docs"] >= 10].reset_index(drop=True)
 
         # Rolling smoothing
         composite["smoothed_index"] = (
