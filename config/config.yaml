@@ -224,7 +224,7 @@ detection:
     zipf_deviation: 0.10
 
 analytics:
-  index_smoothing_window: 7        # days for rolling average
+  index_smoothing_window: 21       # days for rolling average
   anomaly_zscore_threshold: 2.5
   trend_min_data_points: 14
   historical_baseline_year: 2019   # "pre-AI" baseline reference
