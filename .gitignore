@@ -19,7 +19,6 @@ env/
 data/bronze/
 data/silver/
 data/gold/
-data/scored_ids.json
 
 # ── Env / secrets ─────────────────────────────────────────────────────────────
 .env
