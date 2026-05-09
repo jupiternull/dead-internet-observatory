@@ -604,11 +604,9 @@ def chart_projection(df: pd.DataFrame, years: float, accel: float) -> go.Figure:
     if df.empty:
         return go.Figure()
 
-    recent = df.tail(60)
-    x = np.arange(len(recent))
-    y = recent["smoothed_index"].values
-    coeffs = np.polyfit(x, y, 1)
-    slope = coeffs[0] + accel / 365
+    # Slope derived from the same formula as the stat card: -2 pts/yr baseline + accel
+    # Avoids polyfit on sparse historical data, keeps chart and stat card consistent
+    slope = (accel - 2.0) / 365.0
 
     last_date  = df["date"].max()
     last_score = float(df["smoothed_index"].iloc[-1])
@@ -1054,21 +1052,6 @@ def main():
     </p>
     """, unsafe_allow_html=True)
     st.markdown(render_platform_health_bars(src_df), unsafe_allow_html=True)
-
-    # ── Platform Trends ───────────────────────────────────────────────────────
-    st.markdown('<hr class="section-rule"><div class="section-label">Platform Trends</div>',
-                unsafe_allow_html=True)
-    st.markdown(f"""
-<p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
-          color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
-  30-day rolling aliveness score per major platform. Diverging trajectories
-  reveal where synthetic content is accelerating fastest.
-</p>
-""", unsafe_allow_html=True)
-    trends_df = load_platform_trends()
-    if not trends_df.empty:
-        st.plotly_chart(chart_platform_trends(trends_df), use_container_width=True,
-                        config={"displayModeBar": False})
 
     # ── Timeline ──────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Index Timeline</div>',
