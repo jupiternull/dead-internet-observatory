@@ -2,10 +2,10 @@
 Silver → Gold processing pipeline.
 
 Incremental: only scores documents not already present in the gold layer.
-New docs are appended to scored.parquet; the SQLite index is updated each run.
+New docs are appended to scored.parquet; the SQLite index and Supabase are
+updated with each run's delta.
 """
 
-import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +13,7 @@ import yaml
 
 from detection.ai_content_detector import score_dataframe, corpus_summary
 from analytics.aliveness_index import AlivenessIndexEngine
+from pipeline.supabase_sync import sync_all, get_scored_doc_ids
 
 
 class SilverToGoldPipeline:
@@ -26,7 +27,7 @@ class SilverToGoldPipeline:
         self.gold_root.mkdir(parents=True, exist_ok=True)
         self.engine = AlivenessIndexEngine(config_path)
 
-    def run(self, source_file: str = "combined.parquet", max_new_docs: int = 3000):
+    def run(self, source_file: str = "combined.parquet"):
         silver_path = self.silver_root / source_file
         if not silver_path.exists():
             print(f"[GOLD] Silver file not found: {silver_path}")
@@ -36,34 +37,22 @@ class SilverToGoldPipeline:
         silver_df = pd.read_parquet(silver_path)
         print(f"[GOLD] {len(silver_df):,} docs in silver")
 
-        # ── Load already-scored doc_ids from SQLite (committed to repo) ─────────
-        # Gold parquet is not committed between runs, so use observatory.db as
-        # the persistent source of truth for which doc_ids have been scored.
-        db_path = self.config["storage"].get("db_path", "./data/observatory.db")
-        existing_ids: set = set()
-        if Path(db_path).exists():
-            try:
-                with sqlite3.connect(db_path) as con:
-                    rows = con.execute("SELECT doc_id FROM scored_docs").fetchall()
-                existing_ids = {r[0] for r in rows}
-                print(f"[GOLD] {len(existing_ids):,} docs already scored (from SQLite) — skipping")
-            except Exception as exc:
-                print(f"[GOLD] Could not read scored_docs from SQLite ({exc}) — will score all")
+        # ── Load already-scored doc_ids ───────────────────────────────────────
+        gold_path = self.gold_root / "scored.parquet"
+        # Use Supabase as persistent scored-doc registry (survives runner restarts)
+        existing_ids = get_scored_doc_ids()
+        if existing_ids:
+            print(f"[GOLD] {len(existing_ids):,} docs already scored in Supabase — skipping")
         else:
-            print("[GOLD] observatory.db not found — will score all docs")
+            # Fallback for local dev without DATABASE_URL: check gold parquet
+            if gold_path.exists():
+                existing_ids = set(pd.read_parquet(gold_path, columns=["doc_id"])["doc_id"])
+                print(f"[GOLD] {len(existing_ids):,} docs already scored (local parquet fallback)")
+            else:
+                print("[GOLD] No prior scored docs found — scoring full silver batch")
 
         new_df = silver_df[~silver_df["doc_id"].isin(existing_ids)].copy()
-        total_new = len(new_df)
-        print(f"[GOLD] {total_new:,} new docs to score")
-
-        # Cap per-run to keep the Gold step within the pipeline timeout.
-        # Sort newest-first so fresh content is always prioritised.
-        if total_new > max_new_docs:
-            sort_col = "collected_at" if "collected_at" in new_df.columns else None
-            if sort_col:
-                new_df = new_df.sort_values(sort_col, ascending=False)
-            new_df = new_df.head(max_new_docs)
-            print(f"[GOLD] Capped to {max_new_docs:,} docs this run — {total_new - max_new_docs:,} deferred to next run")
+        print(f"[GOLD] {len(new_df):,} new docs to score")
 
         if new_df.empty:
             print("[GOLD] Nothing new — index already up to date")
@@ -75,7 +64,6 @@ class SilverToGoldPipeline:
         print(f"[GOLD] Summary: {summary}")
 
         # ── Append to gold parquet ────────────────────────────────────────────
-        gold_path = self.gold_root / "scored.parquet"
         if gold_path.exists():
             combined = pd.concat(
                 [pd.read_parquet(gold_path), scored],
@@ -90,6 +78,9 @@ class SilverToGoldPipeline:
         # ── Update SQLite index with this run's delta only ────────────────────
         self.engine.ingest_scored_df(scored)
         print("[GOLD] ✓ SQLite index updated")
+
+        # ── Sync delta to Supabase ────────────────────────────────────────────
+        sync_all(scored, self.engine)
 
 
 if __name__ == "__main__":

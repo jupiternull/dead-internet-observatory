@@ -27,6 +27,7 @@ statsmodels>=0.14.1
 
 # ── Database ──────────────────────────────────────────────────────────────────
 # SQLite is stdlib; no extra package needed
+psycopg2-binary>=2.9.9   # Supabase / Postgres sync
 
 # ── Streamlit App ─────────────────────────────────────────────────────────────
 streamlit>=1.32.0

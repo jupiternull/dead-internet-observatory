@@ -84,12 +84,7 @@ class AlivenessIndexEngine:
         with open(config_path) as fh:
             self.config = yaml.safe_load(fh)
 
-        # Resolve db_path relative to the repo root (config file's parent dir),
-        # not the process CWD, so the path is stable regardless of how the app
-        # is launched (Streamlit Cloud changes CWD on code-pull restarts).
-        raw_db = self.config["storage"].get("db_path", "./data/observatory.db")
-        repo_root = Path(config_path).resolve().parent.parent
-        self.db_path = str((repo_root / raw_db).resolve())
+        self.db_path = self.config["storage"].get("db_path", "./data/observatory.db")
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         cfg = self.config["analytics"]
@@ -180,21 +175,6 @@ class AlivenessIndexEngine:
                         (str(date), domain, cat,
                          round(float(scores.mean()), 3), len(group))
                     )
-
-        # Record scored doc_ids so subsequent pipeline runs skip them.
-        # scored_docs is a pipeline-only table — created lazily here so _init_db()
-        # never writes it to the read-only git-tracked DB on Streamlit Cloud.
-        if "doc_id" in df.columns:
-            now = datetime.now(timezone.utc).isoformat()
-            with self._conn() as conn:
-                conn.execute("""CREATE TABLE IF NOT EXISTS scored_docs (
-                    doc_id TEXT PRIMARY KEY,
-                    scored_at TEXT NOT NULL
-                )""")
-                conn.executemany(
-                    "INSERT OR IGNORE INTO scored_docs VALUES (?, ?)",
-                    [(str(doc_id), now) for doc_id in df["doc_id"].dropna()],
-                )
 
         # Recompute composite index
         self._recompute_composite()

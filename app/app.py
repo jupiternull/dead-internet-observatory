@@ -397,6 +397,13 @@ def load_score() -> float:
 
 @st.cache_data(ttl=300)
 def load_total_docs() -> int:
+    try:
+        from pipeline.supabase_sync import get_total_doc_count
+        total = get_total_doc_count()
+        if total > 0:
+            return total
+    except Exception:
+        pass
     engine = get_engine()
     if engine:
         try:
@@ -1057,18 +1064,15 @@ def main():
     </p>
     """, unsafe_allow_html=True)
 
-    if tl_df.empty:
-        st.info("Index timeline is loading — check back shortly.")
-    else:
-        rng_col, _ = st.columns([2, 6])
-        with rng_col:
-            window = st.selectbox("Window", ["All data", "10 years", "5 years", "2 years", "1 year", "90 days", "30 days"],
-                                  index=0, label_visibility="collapsed")
-        day_map = {"All data": 9999, "10 years": 3650, "5 years": 1825, "2 years": 730, "1 year": 365, "90 days": 90, "30 days": 30}
-        cutoff = tl_df["date"].max() - timedelta(days=day_map[window]) if day_map[window] < 9999 else tl_df["date"].min()
-        view = tl_df[tl_df["date"] >= cutoff]
-        st.plotly_chart(chart_timeline(view), use_container_width=True,
-                        config={"displayModeBar": False})
+    rng_col, _ = st.columns([2, 6])
+    with rng_col:
+        window = st.selectbox("Window", ["All data", "10 years", "5 years", "2 years", "1 year", "90 days", "30 days"],
+                              index=0, label_visibility="collapsed")
+    day_map = {"All data": 9999, "10 years": 3650, "5 years": 1825, "2 years": 730, "1 year": 365, "90 days": 90, "30 days": 30}
+    cutoff = tl_df["date"].max() - timedelta(days=day_map[window]) if day_map[window] < 9999 else tl_df["date"].min()
+    view = tl_df[tl_df["date"] >= cutoff]
+    st.plotly_chart(chart_timeline(view), use_container_width=True,
+                    config={"displayModeBar": False})
 
     # ── Signal Radar ──────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Detection Signal Profile</div>',
