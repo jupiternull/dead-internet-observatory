@@ -4,7 +4,7 @@
 
 The [Dead Internet Theory](https://en.wikipedia.org/wiki/Dead_Internet_theory) says the internet is increasingly populated by bots, AI-generated content, and automated engagement farms rather than real humans.
 
-This project is a living observatory that computes an **Internet Aliveness Index (IAI)** -- a 0-100 score measuring how much of the sampled public internet still looks authentically human. Pulling from six data sources, run a battery of statistical detection signals on every document, aggregate everything into a daily index, and serve it through a research-grade Streamlit dashboard.
+This project is a living observatory that computes an **Internet Aliveness Index (IAI)** — a 0–100 score measuring how much of the sampled public internet still looks authentically human. Pulling from 14 data sources, running a battery of statistical detection signals on every document, aggregating everything into a daily index, and serving it through a research-grade Streamlit dashboard.
 
 No LLMs, no paid APIs, no subscriptions. 100% open source and free to run.
 
@@ -15,11 +15,11 @@ No LLMs, no paid APIs, no subscriptions. 100% open source and free to run.
 > Live at: **[dead-internet-observatory-8ryn4twqetgroo5xvrivm5.streamlit.app](https://dead-internet-observatory-8ryn4twqetgroo5xvrivm5.streamlit.app/)**
 
 - Animated IAI gauge with live score and delta vs. 2019 baseline
-- Two-year timeline with anomaly markers and decay shading
-- Source breakdown by corpus (Web, Social, News, Wiki, HN, Wayback)
+- Multi-year timeline with anomaly markers and decay shading
+- Platform health bars across all 14 active sources
 - Detection signal radar chart
 - Anomaly spotlight: statistically significant spikes and crashes
-- **What-if Simulator** -- project future aliveness under different AI acceleration scenarios
+- **What-if Simulator** — project future aliveness under different AI acceleration scenarios
 
 ---
 
@@ -44,55 +44,88 @@ All signals are statistical. No external model calls, no GPU required. Everythin
 ## Architecture
 
 ```
-+-----------------------------------------------------------------+
-|                        DATA MINIONS                             |
-|  Common Crawl · Reddit · News RSS · Wikipedia · HackerNews      |
-|  Wayback Machine (longitudinal sentinel URL tracking)           |
-+------------------------+----------------------------------------+
-                         | raw JSONL -> GitHub Artifacts
-                         v
-+-----------------------------------------------------------------+
-|                      PIPELINE                                   |
-|  Bronze (raw JSONL) -> Silver (normalised Parquet)              |
-|                     -> Gold (scored Parquet)                    |
-|                     -> SQLite (daily index aggregates)          |
-+------------+--------------------------+------------------------+
-             | Parquet -> HF Datasets   | observatory.db -> git repo
-             v                          v
-+--------------------+      +--------------------------------------+
-|  HuggingFace       |      |  Streamlit Community Cloud           |
-|  Datasets          |      |  (research dashboard)                |
-|  (public, free)    |      |                                      |
-+--------------------+      +--------------------------------------+
++---------------------------------------------------------------------------+
+|                             DATA MINIONS (14 active)                      |
+|  Common Crawl · Reddit · News RSS · Wikipedia · HackerNews · Wayback      |
+|  Bluesky · 4chan · Steam · YouTube · LinkedIn · Stack Overflow             |
+|  Mastodon · GitHub Content                                                 |
++-----------------------------------+---------------------------------------+
+                                    | raw JSONL -> GitHub Artifacts
+                                    v
++---------------------------------------------------------------------------+
+|                               PIPELINE                                    |
+|  Bronze (raw JSONL) -> Silver (normalised Parquet)                        |
+|                     -> Gold (scored Parquet, 3000 docs/run cap)           |
+|                     -> SQLite (daily index aggregates -> git)             |
++-------------+-----------------------------+-----------------------------+
+              | Parquet -> HF Datasets      | observatory.db -> git repo
+              v                             v
++--------------------+         +-------------------------------------+
+|  HuggingFace       |         |  Streamlit Community Cloud          |
+|  Datasets          |         |  (research dashboard)               |
+|  (public, free)    |         |                                     |
++--------------------+         +-------------------------------------+
+                                             ^
+                               +-------------------------------------+
+                               |  Supabase (Postgres)                |
+                               |  doc registry · index sync          |
+                               |  scored-doc dedup                   |
+                               +-------------------------------------+
 ```
 
 GitHub Actions runs the full cycle autonomously. No server required.
 
 ```
-03:00 UTC daily  ->  Reddit Minion
-03:30 UTC daily  ->  News Crawler
-04:00 UTC daily  ->  Wikipedia + HackerNews
-06:00 UTC daily  ->  Pipeline (bronze->silver->gold->index)
-02:00 UTC Sunday ->  Wayback Machine + Common Crawl
+01:00 UTC daily   ->  Wayback Machine
+02:00 UTC daily   ->  Common Crawl (5 CC dates/run, 2012–2025 backfill)
+10:00 UTC daily   ->  Common Crawl (repeat)
+18:00 UTC daily   ->  Common Crawl (repeat)
+03:00 UTC daily   ->  Reddit
+03:30 UTC daily   ->  News Crawler
+04:00 UTC daily   ->  Wikipedia + HackerNews
+05:00 UTC daily   ->  Daily Full Sweep (all fast minions)
+06:00 UTC daily   ->  Pipeline (bronze->silver->gold->index)
+06:00 UTC daily   ->  Stack Overflow
+06:30 UTC daily   ->  Bluesky
+07:00 UTC daily   ->  4chan + Steam
+07:00 UTC daily   ->  Mastodon
+08:00 UTC daily   ->  YouTube
+08:30 UTC daily   ->  LinkedIn
+10:00 UTC daily   ->  GitHub Content
+18:00 UTC daily   ->  Stack Overflow (repeat)
+18:00 UTC daily   ->  GitHub Content (repeat)
+20:00 UTC daily   ->  YouTube (repeat)
+21:00 UTC daily   ->  Mastodon (repeat)
 ```
 
 ---
 
 ## Data Sources
 
-| Minion | Source | What we collect |
-|---|---|---|
-| `common_crawl_bot` | [Common Crawl](https://commoncrawl.org) | Quarterly WET snapshots, raw web text across 5 crawl dates |
-| `reddit_bot` | Reddit public JSON API | Posts + comment trees from 10 subreddits |
-| `news_crawler_bot` | 8 RSS feeds | Full article text from major news outlets |
-| `wikipedia_bot` | Wikipedia API | 500 random articles + 24h edit pattern tracking |
-| `hackernews_bot` | [Algolia HN API](https://hn.algolia.com/api) | Stories + comments, last 7 days |
-| `wayback_bot` | [Wayback Machine CDX API](https://web.archive.org/cdx) | 14 sentinel URLs x 5 years (2019-2025), the longitudinal signal |
+| Minion | Source | What we collect | Status |
+|---|---|---|---|
+| `common_crawl_bot` | [Common Crawl](https://commoncrawl.org) | Quarterly WET snapshots, raw web text, 2012–2025 backfill | ✓ |
+| `reddit_bot` | Reddit public JSON API | Posts + comment trees from 10 subreddits | ✓ |
+| `news_crawler_bot` | 8 RSS feeds | Full article text from major news outlets | ✓ |
+| `wikipedia_bot` | Wikipedia API | 500 random articles + 24h edit pattern tracking | ✓ |
+| `hackernews_bot` | [Algolia HN API](https://hn.algolia.com/api) | Stories + comments, last 7 days | ✓ |
+| `wayback_bot` | [Wayback Machine CDX API](https://web.archive.org/cdx) | 14 sentinel URLs × 5 years, longitudinal signal | ✓ |
+| `bluesky_bot` | Bluesky public API | Posts across 5 topic search terms | ✓ |
+| `fourchan_bot` | 4chan JSON API | Posts from 8 boards | ✓ |
+| `steam_bot` | Steam Reviews API | Reviews across 16 popular games | ✓ |
+| `youtube_bot` | YouTube Data API v3 | Comments across 5 topic searches, 3× daily | ✓ |
+| `linkedin_bot` | LinkedIn public feeds | Article text, 3× daily | ✓ |
+| `stackoverflow_bot` | StackExchange API v2.3 | Q&A across 10 tags | ✓ |
+| `mastodon_bot` | 5 Mastodon instances | Public timelines + 5 tag streams | ✓ |
+| `github_bot` | GitHub REST API | README + top issues from trending repos | ✓ |
+| `twitter_bot` | Twitter/X | — | ✗ Cloudflare-blocked |
+| `substack_bot` | Substack | — | ✗ Cloudflare-blocked on GH Actions IPs |
 
 **Where data lives:**
-- Raw JSONL (bronze) -> GitHub Artifacts, 7-day retention
-- Processed Parquet (silver/gold) -> [HuggingFace Datasets](https://huggingface.co/datasets/jupiternull/dead-internet-observatory)
-- Daily index aggregates -> `data/observatory.db` in this repo (what the dashboard reads)
+- Raw JSONL (bronze) → GitHub Artifacts, 7-day retention
+- Processed Parquet (silver/gold) → [HuggingFace Datasets](https://huggingface.co/datasets/jupiternull/dead-internet-observatory)
+- Daily index aggregates → `data/observatory.db` in this repo (what the dashboard reads)
+- Scored doc registry → Supabase `doc_registry` (dedup, all-time count)
 
 ---
 
@@ -104,32 +137,33 @@ cd dead-internet-observatory
 pip install -r requirements.txt
 
 # Populate with synthetic demo data and launch the dashboard
-python3 run_minions.py seed-demo
+python3 analytics/aliveness_index.py --seed-demo
 streamlit run app/app.py
 ```
-
-That's it. The app runs in demo mode immediately with two years of synthetic historical data.
 
 ---
 
 ## Running Real Data Collection
 
-No API keys needed for any of these. All public endpoints.
-
 ```bash
 # Individual minions
-python3 run_minions.py reddit
-python3 run_minions.py news
-python3 run_minions.py wikipedia
-python3 run_minions.py hackernews
-python3 run_minions.py wayback        # slow, fetches 5 years of snapshots
-python3 run_minions.py commoncrawl    # heavy, downloads multi-GB WET files
+python3 -m minions.reddit_bot
+python3 -m minions.news_crawler_bot
+python3 -m minions.wikipedia_bot
+python3 -m minions.hackernews_bot
+python3 -m minions.bluesky_bot
+python3 -m minions.fourchan_bot
+python3 -m minions.steam_bot
+python3 -m minions.youtube_bot
+python3 -m minions.linkedin_bot
+python3 -m minions.stackoverflow_bot
+python3 -m minions.mastodon_bot
+python3 -m minions.github_bot
+python3 -m minions.wayback_bot        # slow — fetches 5 years of snapshots
+python3 -m minions.common_crawl_bot   # heavy — downloads WET files
 
 # Run the full pipeline after harvesting
-python3 run_minions.py pipeline
-
-# Or run everything at once (excludes Common Crawl and Wayback)
-python3 run_minions.py all
+python3 -m pipeline.silver_processing
 ```
 
 ---
@@ -138,12 +172,15 @@ python3 run_minions.py all
 
 **Streamlit Community Cloud (free):**
 1. Fork this repo
-2. Go to [share.streamlit.io](https://share.streamlit.io) -> New app -> point to `streamlit_app.py`
-3. Done, auto-deploys on every push
+2. Go to [share.streamlit.io](https://share.streamlit.io) → New app → point to `app/app.py`
+3. Add `DATABASE_URL` to app secrets (Supabase connection string)
+4. Done — auto-deploys on every push
 
 **Activating autonomous data collection (GitHub Actions):**
-1. Push to GitHub, the cron schedules activate automatically
-2. *(Optional)* Add a `HF_TOKEN` secret in repo Settings -> Secrets for Hugging Face dataset sync
+1. Push to GitHub — cron schedules activate automatically
+2. Add `DATABASE_URL` secret in repo Settings → Secrets (Supabase)
+3. *(Optional)* Add `HF_TOKEN` for HuggingFace dataset sync
+4. *(Optional)* Add `YOUTUBE_API_KEY`, `STACKOVERFLOW_API_KEY`, `GITHUB_TOKEN` for those minions
 
 ---
 
@@ -151,29 +188,28 @@ python3 run_minions.py all
 
 ```
 dead-internet-observatory/
-+-- minions/          # Six data collection bots
-+-- pipeline/         # Bronze -> Silver -> Gold ETL
-+-- detection/        # Statistical AI-content detection engine
-+-- analytics/        # Aliveness Index + anomaly detection
-+-- app/              # Streamlit dashboard
-+-- scripts/          # HuggingFace push helper
-+-- config/           # config.yaml, all tuneable parameters
-+-- .github/workflows/ # Seven autonomous GitHub Actions workflows
+├── minions/           # 14 data collection bots
+├── pipeline/          # Bronze → Silver → Gold ETL + Supabase sync
+├── detection/         # Statistical AI-content detection engine
+├── analytics/         # Aliveness Index computation + anomaly detection
+├── app/               # Streamlit dashboard
+├── scripts/           # HuggingFace push, Supabase migration helpers
+├── config/            # config.yaml — all tuneable parameters
+└── .github/workflows/ # 18 autonomous GitHub Actions workflows
 ```
 
 ---
 
 ## Contributing
 
-This is a living project and there's a lot of room to make the detection engine sharper.
+This is a living project. A few things that would move the needle:
 
-A few things that would move the needle:
-- **Better signal weights** -- calibrated against labeled human/AI datasets (HC3, RAID, M4 on HF)
-- **New minions** -- Internet Archive bulk data, academic paper feeds, forum scrapers
-- **KenLM perplexity scoring** -- train a 3-gram model on pre-2022 Common Crawl as a baseline; score new text against it
-- **Dashboard improvements** -- domain-level leaderboard, country-level breakdowns, embed widget
+- **Better signal weights** — calibrate against labeled human/AI datasets (HC3, RAID, M4 on HF)
+- **New minions** — Internet Archive bulk data, academic paper feeds, forum scrapers
+- **KenLM perplexity scoring** — train a 3-gram model on pre-2022 Common Crawl; score new text against it
+- **Dashboard improvements** — domain-level leaderboard, country-level breakdowns, embed widget
 
-Open an issue or send a PR. The more data sources and signals we add, the better the index gets.
+Open an issue or send a PR.
 
 ---
 
