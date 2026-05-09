@@ -50,7 +50,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub psycopg2-binary torch transformers
+          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub torch transformers
 
       - name: Cache distilgpt2 model
         uses: actions/cache@v4
@@ -108,7 +108,6 @@ jobs:
         run: python3 -m pipeline.silver_processing
         env:
           PYTHONPATH: ${{ github.workspace }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ENABLE_PERPLEXITY: "1"
 
       # ── Push Parquet datasets to Hugging Face ───────────────────────────────
