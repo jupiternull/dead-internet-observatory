@@ -13,12 +13,13 @@ build/
 venv/
 env/
 
-# ── Data — raw and processed layers stay out of git ─────────────────────────
-# Only observatory.db (the live index) is committed — it's what the app reads.
+# ── Data — all local data stays out of git ───────────────────────────────────
 # Bronze/Silver/Gold flow through GitHub Artifacts and Hugging Face Datasets.
+# observatory.db is a local pipeline artifact — dashboard reads from Supabase.
 data/bronze/
 data/silver/
 data/gold/
+data/observatory.db
 
 # ── Env / secrets ─────────────────────────────────────────────────────────────
 .env
