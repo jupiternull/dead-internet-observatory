@@ -31,6 +31,11 @@ except ImportError:
 def _sb_conn():
     url = os.environ.get("DATABASE_URL", "")
     if not url:
+        try:
+            url = st.secrets.get("DATABASE_URL", "")
+        except Exception:
+            pass
+    if not url:
         return None
     try:
         import psycopg2
