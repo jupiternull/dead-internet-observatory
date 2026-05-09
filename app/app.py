@@ -397,13 +397,6 @@ def load_score() -> float:
 
 @st.cache_data(ttl=300)
 def load_total_docs() -> int:
-    try:
-        from pipeline.supabase_sync import get_total_doc_count
-        total = get_total_doc_count()
-        if total > 0:
-            return total
-    except Exception:
-        pass
     engine = get_engine()
     if engine:
         try:
