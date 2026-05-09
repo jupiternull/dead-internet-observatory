@@ -28,20 +28,25 @@ except ImportError:
     ANALYTICS_OK = False
 
 
-def _sb_conn():
-    url = os.environ.get("DATABASE_URL", "")
-    if not url:
-        try:
-            url = st.secrets.get("DATABASE_URL", "")
-        except Exception:
-            pass
-    if not url:
-        return None
-    try:
-        import psycopg2
-        return psycopg2.connect(url, connect_timeout=15)
-    except Exception:
-        return None
+_SUPABASE_URL = "https://qwuabrmpudlqngfcxezh.supabase.co"
+_SUPABASE_KEY = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3dWFicm1wdWRscW5nZmN4ZXpoIiwicm9sZSI6"
+    "ImFub24iLCJpYXQiOjE3Nzc5NDYxMDIsImV4cCI6MjA5MzUyMjEwMn0"
+    ".eTcAx9mcyAdOf4iBymIvpwK-E-Ayg-FKwphoDtzr6Ss"
+)
+
+
+def _sb_get(table: str, params: dict = None) -> list:
+    import requests
+    r = requests.get(
+        f"{_SUPABASE_URL}/rest/v1/{table}",
+        headers={"apikey": _SUPABASE_KEY, "Authorization": f"Bearer {_SUPABASE_KEY}"},
+        params=params or {},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -363,96 +368,60 @@ div.stSlider {{
 
 @st.cache_data(ttl=300)
 def load_timeline(days: int = 3000) -> pd.DataFrame:
-    conn = _sb_conn()
-    if conn is None:
-        return pd.DataFrame()
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date()
-        df = pd.read_sql(
-            "SELECT * FROM composite_index WHERE date >= %s ORDER BY date",
-            conn,
-            params=(cutoff,),
-        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+        data = _sb_get("composite_index", {"date": f"gte.{cutoff}", "order": "date.asc"})
+        df = pd.DataFrame(data)
         if not df.empty:
             df["date"] = pd.to_datetime(df["date"])
             return label_anomalies(df, "aliveness_index")
         return df
     except Exception:
         return pd.DataFrame()
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=300)
 def load_sources() -> pd.DataFrame:
-    conn = _sb_conn()
-    if conn is None:
-        return pd.DataFrame()
     try:
-        return pd.read_sql("SELECT * FROM daily_index", conn)
+        return pd.DataFrame(_sb_get("daily_index"))
     except Exception:
         return pd.DataFrame()
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=300)
 def load_score() -> float:
-    conn = _sb_conn()
-    if conn is None:
-        return 0.0
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT smoothed_index FROM composite_index ORDER BY date DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-        return float(row[0]) if row else 0.0
+        data = _sb_get("composite_index", {"select": "smoothed_index", "order": "date.desc", "limit": "1"})
+        return float(data[0]["smoothed_index"]) if data else 0.0
     except Exception:
         return 0.0
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=300)
 def load_total_docs() -> int:
-    conn = _sb_conn()
-    if conn is None:
-        return 0
     try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT value FROM meta WHERE key = 'total_scored_count'")
-            row = cur.fetchone()
-        return int(row[0]) if row else 0
+        data = _sb_get("meta", {"key": "eq.total_scored_count", "select": "value"})
+        return int(data[0]["value"]) if data else 0
     except Exception:
         return 0
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=300)
 def load_platform_trends() -> pd.DataFrame:
-    conn = _sb_conn()
-    if conn is None:
-        return pd.DataFrame()
     try:
-        df = pd.read_sql(
-            """
-            SELECT date, source, aliveness_index
-            FROM daily_index
-            WHERE source IN ('reddit','hackernews','bluesky','youtube','fourchan','steam')
-              AND date >= CURRENT_DATE - INTERVAL '180 days'
-            ORDER BY date ASC
-            """,
-            conn,
-        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
+        data = _sb_get("daily_index", {
+            "source": "in.(reddit,hackernews,bluesky,youtube,fourchan,steam)",
+            "date": f"gte.{cutoff}",
+            "select": "date,source,aliveness_index",
+            "order": "date.asc",
+        })
+        df = pd.DataFrame(data)
         if not df.empty:
             df["date"] = pd.to_datetime(df["date"])
         return df
     except Exception:
         return pd.DataFrame()
-    finally:
-        conn.close()
 
 
 @st.cache_data(ttl=300)
