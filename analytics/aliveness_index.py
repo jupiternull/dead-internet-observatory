@@ -68,6 +68,11 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS scored_docs (
+    doc_id TEXT PRIMARY KEY,
+    scored_at TEXT NOT NULL
+);
 """
 
 
@@ -175,6 +180,15 @@ class AlivenessIndexEngine:
                         (str(date), domain, cat,
                          round(float(scores.mean()), 3), len(group))
                     )
+
+        # Record scored doc_ids so subsequent runs skip them (gold parquet not persisted)
+        if "doc_id" in df.columns:
+            now = datetime.now(timezone.utc).isoformat()
+            with self._conn() as conn:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO scored_docs VALUES (?, ?)",
+                    [(str(doc_id), now) for doc_id in df["doc_id"].dropna()],
+                )
 
         # Recompute composite index
         self._recompute_composite()
