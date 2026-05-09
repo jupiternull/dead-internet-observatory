@@ -1,11 +1,17 @@
 """
-Supabase sync — persists scored documents and index data to Postgres.
+Supabase sync — lightweight doc registry and index persistence.
 
-Runs automatically at the end of the gold pipeline step.
-Gracefully no-ops if DATABASE_URL is not set, so local runs are unaffected.
+Only stores doc_ids (for dedup) and running count (for dashboard).
+Full document text is never written to Supabase — storage stays minimal.
 
-Set DATABASE_URL in your environment or GitHub Actions secrets:
-  postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres
+Tables used:
+  doc_registry (doc_id TEXT PRIMARY KEY, scored_at TIMESTAMPTZ)
+  meta         (key TEXT PRIMARY KEY, value TEXT)
+  daily_index  — aggregated source scores
+  composite_index — composite IAI per day
+
+Run scripts/migrate_supabase_slim.py once to migrate from the old
+full-documents schema to this lightweight schema.
 """
 
 import logging
@@ -25,7 +31,6 @@ except ImportError:
     PSYCOPG2_OK = False
 
 BATCH_SIZE = 500
-TEXT_MAX   = 10_000   # chars — keeps storage manageable on free tier
 
 
 def _conn() -> Optional["psycopg2.connection"]:
@@ -36,74 +41,55 @@ def _conn() -> Optional["psycopg2.connection"]:
         logger.warning("[SUPABASE] psycopg2 not installed — skipping sync")
         return None
     try:
-        c = psycopg2.connect(url, connect_timeout=15)
-        return c
+        return psycopg2.connect(url, connect_timeout=15)
     except Exception as exc:
         logger.warning(f"[SUPABASE] Connection failed: {exc}")
         return None
 
 
-# ── Documents ─────────────────────────────────────────────────────────────────
+# ── Doc registry (dedup) ──────────────────────────────────────────────────────
 
-def sync_documents(scored_df: pd.DataFrame):
+def sync_doc_ids(scored_df: pd.DataFrame):
+    """Write only doc_ids to doc_registry. No text, no features."""
     conn = _conn()
     if conn is None:
         return
 
     now = datetime.now(timezone.utc).isoformat()
-    needed = [
-        "doc_id", "source", "category", "domain", "url", "title",
-        "text", "text_length", "author", "created_dt",
-        "crawl_partition", "ingested_at", "content_hash", "aliveness_score",
-    ]
+    ids = scored_df["doc_id"].dropna().unique().tolist()
+    if not ids:
+        return
 
-    df = scored_df.copy()
-    for col in needed:
-        if col not in df.columns:
-            df[col] = None
-
-    df = df[needed].copy()
-    # Strip NUL bytes from all string columns — Postgres rejects \x00 in literals
-    str_cols = ["doc_id", "source", "category", "domain", "url", "title",
-                "text", "author", "crawl_partition", "ingested_at", "content_hash"]
-    for col in str_cols:
-        df[col] = df[col].apply(
-            lambda v: v.replace('\x00', '') if isinstance(v, str) else v
-        )
-    df["text"] = df["text"].apply(
-        lambda t: t[:TEXT_MAX] if isinstance(t, str) else t
-    )
-    df["created_dt"] = pd.to_datetime(df["created_dt"], errors="coerce", utc=True)
-    df["created_dt"] = df["created_dt"].apply(
-        lambda t: t.isoformat() if pd.notna(t) else None
-    )
-    # Replace all remaining NaN/NaT/inf with None so psycopg2 sends NULL
-    df = df.where(df.notna(), other=None)
-
-    total = 0
     try:
         with conn:
             cur = conn.cursor()
-            for i in range(0, len(df), BATCH_SIZE):
-                batch = df.iloc[i : i + BATCH_SIZE]
-                rows = [
-                    tuple(None if (isinstance(v, float) and v != v) else v for v in r) + (now,)
-                    for r in batch.itertuples(index=False, name=None)
-                ]
-                psycopg2.extras.execute_values(cur, """
-                    INSERT INTO documents
-                        (doc_id, source, category, domain, url, title, text,
-                         text_length, author, created_dt, crawl_partition,
-                         ingested_at, content_hash, aliveness_score, scored_at)
-                    VALUES %s
-                    ON CONFLICT (doc_id) DO UPDATE SET
-                        aliveness_score = EXCLUDED.aliveness_score,
-                        scored_at       = EXCLUDED.scored_at
-                """, rows, page_size=BATCH_SIZE)
-                total += len(batch)
-        logger.info(f"[SUPABASE] ✓ {total:,} documents upserted")
+            psycopg2.extras.execute_values(cur, """
+                INSERT INTO doc_registry (doc_id, scored_at)
+                VALUES %s
+                ON CONFLICT (doc_id) DO NOTHING
+            """, [(doc_id, now) for doc_id in ids], page_size=BATCH_SIZE)
+        logger.info(f"[SUPABASE] ✓ {len(ids):,} doc_ids registered")
     except Exception as exc:
-        logger.warning(f"[SUPABASE] Document sync error: {exc}")
+        logger.warning(f"[SUPABASE] sync_doc_ids error: {exc}")
+    finally:
+        conn.close()
+
+
+def _increment_doc_count(n: int):
+    """Increment the persistent running total in meta table."""
+    conn = _conn()
+    if conn is None:
+        return
+    try:
+        with conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO meta (key, value) VALUES ('total_scored_count', %s)
+                ON CONFLICT (key) DO UPDATE
+                    SET value = (CAST(meta.value AS BIGINT) + %s)::TEXT
+            """, (str(n), n))
+    except Exception as exc:
+        logger.warning(f"[SUPABASE] _increment_doc_count error: {exc}")
     finally:
         conn.close()
 
@@ -164,30 +150,27 @@ def sync_index(engine):
                         smoothed_index  = EXCLUDED.smoothed_index,
                         n_docs          = EXCLUDED.n_docs,
                         anomaly_flag    = EXCLUDED.anomaly_flag,
-                        anomaly_reason  = EXCLUDED.anomaly_reason,
-                        updated_at      = NOW()
+                        anomaly_reason  = EXCLUDED.anomaly_reason
                 """, rows, page_size=BATCH_SIZE)
                 logger.info(f"[SUPABASE] ✓ {len(rows):,} composite_index rows upserted")
 
     except Exception as exc:
-        logger.warning(f"[SUPABASE] Index sync error: {exc}")
+        logger.warning(f"[SUPABASE] sync_index error: {exc}")
     finally:
         conn.close()
 
 
-# ── Read helpers (used by pipeline for incremental scoring) ──────────────────
+# ── Read helpers ──────────────────────────────────────────────────────────────
 
 def get_scored_doc_ids() -> set:
-    """Return the set of doc_ids already scored and stored in Supabase.
-    Used by the pipeline to determine which documents are genuinely new.
-    Returns empty set if DATABASE_URL is unset or connection fails."""
+    """Return all doc_ids already scored. Used by pipeline for dedup."""
     conn = _conn()
     if conn is None:
         return set()
     try:
         with conn:
             cur = conn.cursor()
-            cur.execute("SELECT doc_id FROM documents")
+            cur.execute("SELECT doc_id FROM doc_registry")
             return {row[0] for row in cur.fetchall()}
     except Exception as exc:
         logger.warning(f"[SUPABASE] get_scored_doc_ids failed: {exc}")
@@ -197,16 +180,14 @@ def get_scored_doc_ids() -> set:
 
 
 def get_total_doc_count() -> int:
-    """Return the total number of scored documents stored in Supabase.
-    Used by the dashboard to show the true all-time corpus size.
-    Returns 0 if DATABASE_URL is unset or connection fails."""
+    """Return the all-time scored document count from the meta counter."""
     conn = _conn()
     if conn is None:
         return 0
     try:
         with conn:
             cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM documents")
+            cur.execute("SELECT value FROM meta WHERE key = 'total_scored_count'")
             row = cur.fetchone()
             return int(row[0]) if row else 0
     except Exception as exc:
@@ -216,12 +197,13 @@ def get_total_doc_count() -> int:
         conn.close()
 
 
-# ── Convenience: run both ─────────────────────────────────────────────────────
+# ── Convenience ───────────────────────────────────────────────────────────────
 
 def sync_all(scored_df: pd.DataFrame, engine):
     if not os.environ.get("DATABASE_URL"):
-        logger.info("[SUPABASE] DATABASE_URL not set — skipping sync (SQLite only)")
+        logger.info("[SUPABASE] DATABASE_URL not set — skipping sync")
         return
-    logger.info("[SUPABASE] Syncing to Postgres …")
-    sync_documents(scored_df)
+    logger.info("[SUPABASE] Syncing to Supabase …")
+    sync_doc_ids(scored_df)
+    _increment_doc_count(len(scored_df))
     sync_index(engine)
