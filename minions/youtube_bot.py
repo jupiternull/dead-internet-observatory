@@ -46,7 +46,7 @@ class YoutubeBot(BaseMinion):
                 "q":                 topic,
                 "type":              "video",
                 "maxResults":        self.videos_per_topic,
-                "order":             "relevance",
+                "order":             "date",
                 "relevanceLanguage": "en",
                 "key":               self.api_key,
             }, timeout=30)
