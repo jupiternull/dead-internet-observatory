@@ -1,4 +1,0 @@
-# Treat SQLite databases as binary to prevent line-ending corruption
-*.db binary
-*.db-wal binary
-*.db-shm binary
