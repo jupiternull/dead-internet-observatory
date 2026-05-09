@@ -50,7 +50,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub torch transformers
+          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub psycopg2-binary torch transformers
 
       - name: Cache distilgpt2 model
         uses: actions/cache@v4
@@ -58,13 +58,6 @@ jobs:
           path: ~/.cache/huggingface
           key: hf-distilgpt2-v1
           restore-keys: hf-distilgpt2-
-
-      - name: Restore scored_ids cache
-        uses: actions/cache@v4
-        with:
-          path: data/scored_ids.json
-          key: scored-ids-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: scored-ids-${{ github.ref_name }}-
 
       # ── Download bronze artifacts from all minion runs today ────────────────
       # Uses gh api directly to find and extract each artifact into the exact
@@ -115,6 +108,7 @@ jobs:
         run: python3 -m pipeline.silver_processing
         env:
           PYTHONPATH: ${{ github.workspace }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ENABLE_PERPLEXITY: "1"
 
       # ── Push Parquet datasets to Hugging Face ───────────────────────────────
