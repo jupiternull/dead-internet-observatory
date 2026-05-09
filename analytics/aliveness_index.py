@@ -89,7 +89,12 @@ class AlivenessIndexEngine:
         with open(config_path) as fh:
             self.config = yaml.safe_load(fh)
 
-        self.db_path = self.config["storage"].get("db_path", "./data/observatory.db")
+        # Resolve db_path relative to the repo root (config file's parent dir),
+        # not the process CWD, so the path is stable regardless of how the app
+        # is launched (Streamlit Cloud changes CWD on code-pull restarts).
+        raw_db = self.config["storage"].get("db_path", "./data/observatory.db")
+        repo_root = Path(config_path).resolve().parent.parent
+        self.db_path = str((repo_root / raw_db).resolve())
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         cfg = self.config["analytics"]
