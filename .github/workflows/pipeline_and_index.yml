@@ -120,3 +120,13 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
+      # ── Commit only the SQLite index back to the repo ───────────────────────
+      # Raw and processed data stays out of git — only the live index goes in.
+      - name: Commit observatory.db to repo
+        run: |
+          git config user.name  "Observatory Pipeline"
+          git config user.email "bot@dead-internet-observatory.noreply"
+          git add data/observatory.db || true
+          git diff --cached --quiet || git commit -m "chore(index): update $(date -u +%Y-%m-%d)"
+          git push || echo "Nothing to push"
+        continue-on-error: true
