@@ -68,11 +68,6 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
 );
-
-CREATE TABLE IF NOT EXISTS scored_docs (
-    doc_id TEXT PRIMARY KEY,
-    scored_at TEXT NOT NULL
-);
 """
 
 
@@ -186,10 +181,16 @@ class AlivenessIndexEngine:
                          round(float(scores.mean()), 3), len(group))
                     )
 
-        # Record scored doc_ids so subsequent runs skip them (gold parquet not persisted)
+        # Record scored doc_ids so subsequent pipeline runs skip them.
+        # scored_docs is a pipeline-only table — created lazily here so _init_db()
+        # never writes it to the read-only git-tracked DB on Streamlit Cloud.
         if "doc_id" in df.columns:
             now = datetime.now(timezone.utc).isoformat()
             with self._conn() as conn:
+                conn.execute("""CREATE TABLE IF NOT EXISTS scored_docs (
+                    doc_id TEXT PRIMARY KEY,
+                    scored_at TEXT NOT NULL
+                )""")
                 conn.executemany(
                     "INSERT OR IGNORE INTO scored_docs VALUES (?, ?)",
                     [(str(doc_id), now) for doc_id in df["doc_id"].dropna()],
