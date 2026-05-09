@@ -16,6 +16,10 @@ on:
       - "💼 LinkedIn Minion"
       - "🐦 Twitter/X Minion"
       - "🌐 Daily Full Sweep"
+      - "🔢 Stack Overflow Minion"
+      - "🐘 Mastodon Minion"
+      - "📰 Substack Minion"
+      - "🐙 GitHub Content Minion"
     types: [completed]
   schedule:
     - cron: "0 6 * * *"       # Daily at 06:00 UTC — catches all overnight minions
@@ -46,7 +50,14 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub psycopg2-binary
+          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub psycopg2-binary torch transformers
+
+      - name: Cache distilgpt2 model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-distilgpt2-v1
+          restore-keys: hf-distilgpt2-
 
       # ── Download bronze artifacts from all minion runs today ────────────────
       # Uses gh api directly to find and extract each artifact into the exact
@@ -60,8 +71,10 @@ jobs:
             [hn]=hackernews [wayback]=wayback [commoncrawl]=common_crawl
             [bluesky]=bluesky [fourchan]=fourchan [steam]=steam
             [youtube]=youtube [linkedin]=linkedin [twitter]=twitter
+            [stackoverflow]=stackoverflow [mastodon]=mastodon
+            [substack]=substack [github]=github
           )
-          PATTERN='^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter|sweep)-bronze-'
+          PATTERN='^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter|stackoverflow|mastodon|substack|github|sweep)-bronze-'
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
             | jq -r '.artifacts[] | select(.expired == false) | select(.name | test("'"$PATTERN"'")) | "\(.id) \(.name)"' \
             | while read artifact_id artifact_name; do
@@ -96,6 +109,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ENABLE_PERPLEXITY: "1"
 
       # ── Push Parquet datasets to Hugging Face ───────────────────────────────
       - name: Push datasets to Hugging Face

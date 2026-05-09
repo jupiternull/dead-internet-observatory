@@ -414,6 +414,31 @@ def load_total_docs() -> int:
 
 
 @st.cache_data(ttl=300)
+def load_platform_trends() -> pd.DataFrame:
+    import sqlite3
+    if not Path(DB_PATH).exists():
+        return pd.DataFrame()
+    try:
+        con = sqlite3.connect(DB_PATH)
+        df = pd.read_sql_query(
+            """
+            SELECT date, source, aliveness_index
+            FROM daily_index
+            WHERE source IN ('reddit','hackernews','bluesky','youtube','fourchan','steam')
+              AND date >= date('now', '-180 days')
+            ORDER BY date ASC
+            """,
+            con,
+        )
+        con.close()
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"])
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)
 def load_signal_means() -> dict:
     gold_path = ROOT / "data" / "gold" / "scored.parquet"
     if not gold_path.exists():
@@ -685,6 +710,72 @@ def chart_radar(sources_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def chart_platform_trends(trends_df: pd.DataFrame) -> go.Figure:
+    platform_colors = {
+        "reddit":      P["gold"],
+        "hackernews":  P["rust"],
+        "bluesky":     "#0085FF",
+        "youtube":     "#CC0000",
+        "fourchan":    "#6B8E23",
+        "steam":       "#1B2838",
+    }
+
+    fig = go.Figure()
+    for source, grp in trends_df.groupby("source"):
+        grp = grp.sort_values("date").copy()
+        grp["smoothed"] = grp["aliveness_index"].rolling(7, min_periods=1).mean()
+        color = platform_colors.get(source, P["ink_light"])
+        fig.add_trace(go.Scatter(
+            x=grp["date"],
+            y=grp["smoothed"],
+            mode="lines",
+            name=source.replace("_", " ").title(),
+            line=dict(color=color, width=2),
+            hovertemplate=(
+                f"<b>{source.replace('_',' ').title()}</b><br>"
+                "%{x|%d %b %Y}<br>"
+                "Aliveness: <b>%{y:.1f}</b><extra></extra>"
+            ),
+        ))
+
+    fig.update_layout(
+        **PLOTLY_BASE,
+        height=320,
+        margin=dict(l=40, r=20, t=10, b=40),
+        xaxis=dict(
+            showgrid=True,
+            gridcolor=P["border_soft"],
+            zeroline=False,
+            tickformat="%b '%y",
+            tickfont=dict(size=10, family="Inter"),
+        ),
+        yaxis=dict(
+            title=dict(
+                text="Aliveness Score",
+                font=dict(size=10, family="Inter", color=P["ink_light"]),
+            ),
+            range=[0, 100],
+            showgrid=True,
+            gridcolor=P["border_soft"],
+            zeroline=False,
+            tickfont=dict(size=10, family="Inter"),
+        ),
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=0.99,
+            xanchor="right",
+            x=0.99,
+            font=dict(size=10, family="Inter"),
+            bgcolor="rgba(242,237,228,0.85)",
+            bordercolor=P["border_soft"],
+            borderwidth=1,
+        ),
+        hovermode="x unified",
+    )
+    return fig
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  LAYOUT
 # ══════════════════════════════════════════════════════════════════════════════
@@ -810,6 +901,10 @@ def render_source_rows(src_df: pd.DataFrame):
         "youtube":      "#CC0000",
         "linkedin":     "#0A66C2",
         "twitter":      "#1DA1F2",
+        "stackoverflow": "#F48024",
+        "mastodon":      "#6364FF",
+        "substack":      "#FF6719",
+        "github":        "#6E40C9",
     }
     rows_html = ""
     for src, score in agg.items():
@@ -959,6 +1054,21 @@ def main():
     </p>
     """, unsafe_allow_html=True)
     st.markdown(render_platform_health_bars(src_df), unsafe_allow_html=True)
+
+    # ── Platform Trends ───────────────────────────────────────────────────────
+    st.markdown('<hr class="section-rule"><div class="section-label">Platform Trends</div>',
+                unsafe_allow_html=True)
+    st.markdown(f"""
+<p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
+          color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
+  30-day rolling aliveness score per major platform. Diverging trajectories
+  reveal where synthetic content is accelerating fastest.
+</p>
+""", unsafe_allow_html=True)
+    trends_df = load_platform_trends()
+    if not trends_df.empty:
+        st.plotly_chart(chart_platform_trends(trends_df), use_container_width=True,
+                        config={"displayModeBar": False})
 
     # ── Timeline ──────────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Index Timeline</div>',

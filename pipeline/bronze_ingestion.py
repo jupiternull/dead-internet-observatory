@@ -363,8 +363,95 @@ def _normalise_twitter(raw: Dict, partition: str) -> Optional[Dict]:
     }
 
 
+def _normalise_stackoverflow(raw: Dict, partition: str) -> Optional[Dict]:
+    text = (raw.get("text") or "").strip()
+    if not text:
+        return None
+    identifier = f"{raw.get('question_id','')}:{raw.get('answer_id','')}"
+    return {
+        "doc_id":          _make_doc_id("stackoverflow", identifier, text),
+        "source":          "stackoverflow",
+        "category":        "qa",
+        "domain":          "stackoverflow.com",
+        "url":             raw.get("url", ""),
+        "title":           raw.get("title", ""),
+        "text":            text,
+        "text_length":     len(text),
+        "author":          str(raw.get("owner_reputation", "")),
+        "created_dt":      raw.get("created_at", ""),
+        "crawl_partition": partition,
+        "ingested_at":     raw.get("_ingested_at", ""),
+        "content_hash":    identifier,
+    }
+
+
+def _normalise_mastodon(raw: Dict, partition: str) -> Optional[Dict]:
+    text = (raw.get("text") or "").strip()
+    if not text:
+        return None
+    instance = raw.get("instance", "mastodon.social")
+    return {
+        "doc_id":          _make_doc_id("mastodon", raw.get("status_id", ""), text),
+        "source":          "mastodon",
+        "category":        "social",
+        "domain":          instance,
+        "url":             raw.get("url", ""),
+        "title":           "",
+        "text":            text,
+        "text_length":     len(text),
+        "author":          raw.get("author_acct", ""),
+        "created_dt":      raw.get("created_at", ""),
+        "crawl_partition": partition,
+        "ingested_at":     raw.get("_ingested_at", ""),
+        "content_hash":    raw.get("status_id", ""),
+    }
+
+
+def _normalise_substack(raw: Dict, partition: str) -> Optional[Dict]:
+    text = (raw.get("text") or "").strip()
+    if not text:
+        return None
+    return {
+        "doc_id":          _make_doc_id("substack", raw.get("url", ""), text),
+        "source":          "substack",
+        "category":        "blog",
+        "domain":          f"{raw.get('publication','')}.substack.com",
+        "url":             raw.get("url", ""),
+        "title":           raw.get("title", ""),
+        "text":            text,
+        "text_length":     len(text),
+        "author":          raw.get("author", ""),
+        "created_dt":      raw.get("published_at", ""),
+        "crawl_partition": partition,
+        "ingested_at":     raw.get("_ingested_at", ""),
+        "content_hash":    raw.get("post_id", ""),
+    }
+
+
+def _normalise_github(raw: Dict, partition: str) -> Optional[Dict]:
+    text = (raw.get("text") or "").strip()
+    if not text:
+        return None
+    identifier = f"{raw.get('repo_full_name','')}:{raw.get('record_type','')}:{raw.get('issue_number','readme')}"
+    return {
+        "doc_id":          _make_doc_id("github", identifier, text),
+        "source":          "github",
+        "category":        "code_doc",
+        "domain":          "github.com",
+        "url":             raw.get("url", ""),
+        "title":           raw.get("title", ""),
+        "text":            text,
+        "text_length":     len(text),
+        "author":          raw.get("author", ""),
+        "created_dt":      raw.get("pushed_at") or raw.get("created_at", ""),
+        "crawl_partition": partition,
+        "ingested_at":     raw.get("_ingested_at", ""),
+        "content_hash":    identifier,
+    }
+
+
 NORMALISERS = {
-    "common_crawl": _normalise_common_crawl,
+    "common_crawl":  _normalise_common_crawl,
     "reddit":        _normalise_reddit,
     "news":          _normalise_news,
     "wikipedia":     _normalise_wikipedia,
@@ -376,6 +463,10 @@ NORMALISERS = {
     "youtube":       _normalise_youtube,
     "linkedin":      _normalise_linkedin,
     "twitter":       _normalise_twitter,
+    "stackoverflow": _normalise_stackoverflow,
+    "mastodon":      _normalise_mastodon,
+    "substack":      _normalise_substack,
+    "github":        _normalise_github,
 }
 
 
@@ -456,6 +547,7 @@ class BronzeToSilverPipeline:
             "common_crawl", "reddit", "news", "wikipedia/articles",
             "hackernews", "wayback",
             "bluesky", "fourchan", "steam", "youtube", "linkedin", "twitter",
+            "stackoverflow", "mastodon", "substack", "github",
         ]
         frames: List[pd.DataFrame] = []
 
