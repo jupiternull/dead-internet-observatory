@@ -84,7 +84,9 @@ class AlivenessIndexEngine:
         with open(config_path) as fh:
             self.config = yaml.safe_load(fh)
 
-        self.db_path = self.config["storage"].get("db_path", "./data/observatory.db")
+        raw_db = self.config["storage"].get("db_path", "./data/observatory.db")
+        repo_root = Path(config_path).resolve().parent.parent
+        self.db_path = str((repo_root / raw_db).resolve())
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         cfg = self.config["analytics"]
@@ -178,6 +180,10 @@ class AlivenessIndexEngine:
 
         # Recompute composite index
         self._recompute_composite()
+
+        # Update per-signal running means (powers the radar chart)
+        self._update_signal_stats(df)
+
         print(f"[INDEX] Ingested {len(df):,} docs, updated composite index")
 
     def _recompute_composite(self):
@@ -295,6 +301,70 @@ class AlivenessIndexEngine:
                 "SELECT COALESCE(SUM(n_docs), 0) FROM daily_index"
             ).fetchone()
         return int(row[0])
+
+    def _update_signal_stats(self, df: pd.DataFrame):
+        """
+        Incrementally update per-signal running means in the signal_stats table.
+        Uses a weighted mean so every historically scored doc is reflected,
+        not just the current run's batch.
+        Created lazily here (pipeline-only path) so Streamlit Cloud never writes it.
+        """
+        signal_cols = [c for c in df.columns if c.startswith("score_")]
+        if not signal_cols:
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS signal_stats (
+                    signal TEXT PRIMARY KEY,
+                    mean_value REAL NOT NULL,
+                    n_docs INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            for col in signal_cols:
+                series = df[col].dropna()
+                if series.empty:
+                    continue
+                new_mean = float(series.mean())
+                new_n    = len(series)
+                signal   = col[len("score_"):]
+                row = conn.execute(
+                    "SELECT mean_value, n_docs FROM signal_stats WHERE signal = ?",
+                    (signal,)
+                ).fetchone()
+                if row:
+                    old_n    = int(row["n_docs"])
+                    combined = (row["mean_value"] * old_n + new_mean * new_n) / (old_n + new_n)
+                    conn.execute(
+                        """UPDATE signal_stats
+                           SET mean_value = ?, n_docs = ?, updated_at = ?
+                           WHERE signal = ?""",
+                        (round(combined, 6), old_n + new_n, now, signal)
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO signal_stats VALUES (?, ?, ?, ?)",
+                        (signal, round(new_mean, 6), new_n, now)
+                    )
+
+    def get_signal_stats(self) -> Dict[str, float]:
+        """
+        Return per-signal cumulative means as a score_* → 0-100 float dict.
+        Returns {} if the table doesn't exist yet (before first pipeline run).
+        """
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT signal, mean_value FROM signal_stats"
+                ).fetchall()
+            return {
+                f"score_{r['signal']}": round(float(r["mean_value"]) * 100, 1)
+                for r in rows
+            }
+        except Exception:
+            return {}
 
     def get_meta(self, key: str) -> Optional[str]:
         with self._conn() as conn:
