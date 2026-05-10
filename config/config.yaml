@@ -18,8 +18,6 @@ sources:
     # Quarterly snapshots — format CC-MAIN-YYYY-WW
     # 2012 uses older single-crawl naming; 2013+ use YYYY-WW weekly format
     crawl_dates:
-      # 2012 — oldest reliably queryable CC archive
-      - "2012"
       # 2013 — pre-AI baseline
       - "2013-20"
       - "2013-48"
