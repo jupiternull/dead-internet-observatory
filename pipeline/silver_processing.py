@@ -16,7 +16,7 @@ from detection.ai_content_detector import score_dataframe, corpus_summary
 from analytics.aliveness_index import AlivenessIndexEngine
 from pipeline.supabase_sync import sync_all, get_scored_doc_ids
 
-MAX_NEW_DOCS = 3_000
+MAX_NEW_DOCS = 6_000
 
 
 class SilverToGoldPipeline:

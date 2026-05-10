@@ -205,6 +205,12 @@ class CommonCrawlMinion(BaseMinion):
         remaining = [cid for cid in all_ids if cid not in done]
 
         if not remaining:
+            self.logger.info("[CC] All dates complete — resetting for next sampling pass.")
+            done = set()
+            self._save_progress(done)
+            remaining = list(all_ids)
+
+        if not remaining:
             self.logger.info("🤖 Common Crawl Minion — all known crawl dates processed")
             return
 

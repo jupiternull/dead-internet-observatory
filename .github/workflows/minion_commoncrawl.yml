@@ -2,9 +2,12 @@ name: "🌐 Common Crawl Minion"
 
 on:
   schedule:
-    - cron: "0 2 * * *"      # 02:00 UTC
-    - cron: "0 10 * * *"     # 10:00 UTC
-    - cron: "0 18 * * *"     # 18:00 UTC
+    - cron: "0 2 * * *"    # 02:00 UTC
+    - cron: "0 6 * * *"    # 06:00 UTC
+    - cron: "0 10 * * *"   # 10:00 UTC
+    - cron: "0 14 * * *"   # 14:00 UTC
+    - cron: "0 18 * * *"   # 18:00 UTC
+    - cron: "0 22 * * *"   # 22:00 UTC
   workflow_dispatch:
     inputs:
       crawl_date:
@@ -18,6 +21,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: cc-backfill
+  cancel-in-progress: false
 
 jobs:
   crawl:
@@ -65,7 +72,7 @@ jobs:
         run: |
           git config user.name  "Common Crawl Bot"
           git config user.email "bot@dead-internet-observatory.noreply"
-          git add data/bronze/common_crawl/ || true
+          git add data/bronze/common_crawl/ config/cc_progress.json || true
           git diff --cached --quiet || git commit -m "chore(data): CC harvest $(date -u +%Y-%m-%d)"
           git push || echo "Push skipped"
         continue-on-error: true
