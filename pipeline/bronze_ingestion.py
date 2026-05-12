@@ -10,13 +10,14 @@ by uncommenting the marked sections for Databricks/large scale.
 """
 
 import json
-import sqlite3
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import yaml
 
 
@@ -541,32 +542,34 @@ class BronzeToSilverPipeline:
         print(f"  ✓ {len(df):,} records → {out}")
         return df
 
-    def run_all(self) -> pd.DataFrame:
-        """Process all sources and combine into a single silver DataFrame."""
+    def run_all(self) -> None:
+        """Process all sources and stream-write combined.parquet without loading all sources into RAM."""
         sources = [
             "common_crawl", "reddit", "news", "wikipedia/articles",
             "hackernews", "wayback",
             "bluesky", "fourchan", "steam", "youtube", "linkedin", "twitter",
             "stackoverflow", "mastodon", "substack", "github",
         ]
-        frames: List[pd.DataFrame] = []
+        out = self.silver_root / "combined.parquet"
+        writer = None
+        total = 0
 
         for src in sources:
             df = self.process_source(src)
-            if not df.empty:
-                frames.append(df)
+            if df.empty:
+                continue
+            table = pa.Table.from_pandas(df, preserve_index=False)
+            if writer is None:
+                writer = pq.ParquetWriter(out, table.schema)
+            writer.write_table(table)
+            total += len(df)
+            del df, table  # free each source's memory before loading the next
 
-        if not frames:
+        if writer:
+            writer.close()
+            print(f"\n[PIPELINE] Combined silver: {total:,} records → {out}")
+        else:
             print("[PIPELINE] No data to combine")
-            return pd.DataFrame()
-
-        combined = pd.concat(frames, ignore_index=True)
-        combined.drop_duplicates(subset=["doc_id"], inplace=True)
-
-        out = self.silver_root / "combined.parquet"
-        combined.to_parquet(out, index=False, engine="pyarrow")
-        print(f"\n[PIPELINE] Combined silver: {len(combined):,} unique records → {out}")
-        return combined
 
 
 if __name__ == "__main__":
