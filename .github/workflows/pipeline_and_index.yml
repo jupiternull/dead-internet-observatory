@@ -76,7 +76,7 @@ jobs:
           )
           PATTERN='^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter|stackoverflow|mastodon|substack|github|sweep)-bronze-'
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
-            | jq -r '.artifacts[] | select(.expired == false) | select(.name | test("'"$PATTERN"'")) | "\(.id) \(.name)"' \
+            | jq -r '[.artifacts[] | select(.expired == false) | select(.name | test("'"$PATTERN"'"))] | group_by(.name | split("-bronze-")[0]) | map(sort_by(.created_at) | last) | .[] | "\(.id) \(.name)"' \
             | while read artifact_id artifact_name; do
                 prefix="${artifact_name%%-bronze-*}"
                 if [ "$prefix" = "sweep" ]; then
