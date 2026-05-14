@@ -25,6 +25,9 @@ data/observatory.db
 .env
 .env.*
 *.secret
+*.pem
+*.key
+.streamlit/secrets.toml
 
 # ── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
