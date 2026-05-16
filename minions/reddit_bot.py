@@ -6,7 +6,10 @@ We iterate through /new.json with pagination to collect recent content.
 Optionally fetches top-level comment trees per post.
 """
 
+import html
+import re
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Dict, Iterator, List, Optional
 
@@ -42,6 +45,9 @@ class RedditMinion(BaseMinion):
                 self.logger.warning(f"Rate-limited — sleeping {retry_after}s")
                 time.sleep(retry_after)
                 return None
+            if resp.status_code == 403:
+                self.logger.warning(f"403 blocked by Reddit JSON API: {url}")
+                return {"_blocked": True}
             resp.raise_for_status()
             return resp.json()
         except requests.HTTPError as exc:
@@ -52,6 +58,78 @@ class RedditMinion(BaseMinion):
         return None
 
     # ── Post harvesting ───────────────────────────────────────────────────────
+
+    def _iter_rss_posts(self, sub: str) -> Iterator[Dict]:
+        """Fallback: harvest posts from the Atom/RSS feed when the JSON API is blocked."""
+        url = f"{self.REDDIT_BASE}/r/{sub}/new.rss"
+        try:
+            resp = requests.get(url, headers=self.HEADERS, timeout=30)
+            resp.raise_for_status()
+        except Exception as exc:
+            self.logger.error(f"RSS fallback failed for r/{sub}: {exc}")
+            return
+
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        root = ET.fromstring(resp.content)
+
+        for entry in root.findall("atom:entry", ns):
+            title_el = entry.find("atom:title", ns)
+            title = title_el.text.strip() if title_el is not None and title_el.text else ""
+
+            link_el = entry.find("atom:link[@rel='alternate']", ns) or entry.find("atom:link", ns)
+            permalink = link_el.get("href", "") if link_el is not None else ""
+
+            author_el = entry.find("atom:author/atom:name", ns)
+            author = author_el.text.strip() if author_el is not None and author_el.text else "[unknown]"
+
+            updated_el = entry.find("atom:updated", ns)
+            created_dt = None
+            created_utc = 0
+            if updated_el is not None and updated_el.text:
+                try:
+                    dt = datetime.fromisoformat(updated_el.text.replace("Z", "+00:00"))
+                    created_dt = dt.isoformat()
+                    created_utc = int(dt.timestamp())
+                except Exception:
+                    pass
+
+            content_el = entry.find("atom:content", ns)
+            raw_html = content_el.text if content_el is not None and content_el.text else ""
+            text_body = re.sub(r"<[^>]+>", " ", html.unescape(raw_html)).strip()
+            text_body = re.sub(r"\s+", " ", text_body).strip()
+            text = f"{title}\n\n{text_body}".strip() if text_body else title
+            if not text:
+                continue
+
+            id_el = entry.find("atom:id", ns)
+            entry_id = id_el.text.strip() if id_el is not None and id_el.text else ""
+            # URL form: .../comments/{post_id}/slug/
+            parts = [p for p in entry_id.rstrip("/").split("/") if p]
+            post_id = parts[-2] if len(parts) >= 2 and parts[-2] != "comments" else parts[-1]
+
+            record: Dict = {
+                "id": post_id,
+                "title": title,
+                "text": text[:3000],
+                "text_length": len(text),
+                "url": permalink,
+                "permalink": permalink,
+                "author": author,
+                "subreddit": sub,
+                "score": 0,
+                "upvote_ratio": 0.0,
+                "num_comments": 0,
+                "created_utc": created_utc,
+                "created_dt": created_dt,
+                "flair": "",
+                "is_self": True,
+                "domain": f"self.{sub}",
+                "gilded": 0,
+                "content_hash": self.content_hash(text),
+                "comments": [],
+            }
+            yield record
+            self.stats["fetched"] += 1
 
     def iter_subreddit_posts(self, sub: str) -> Iterator[Dict]:
         """Paginate through /r/{sub}/new, yielding structured post records."""
@@ -66,6 +144,10 @@ class RedditMinion(BaseMinion):
                 params["after"] = after
 
             data = self._get(f"{self.REDDIT_BASE}/r/{sub}/new.json", params)
+            if data and data.get("_blocked"):
+                self.logger.warning(f"  JSON API blocked — falling back to RSS for r/{sub}")
+                yield from self._iter_rss_posts(sub)
+                return
             if not data or "data" not in data:
                 break
 
