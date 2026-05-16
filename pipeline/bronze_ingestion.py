@@ -39,6 +39,25 @@ SILVER_COLUMNS = [
     "content_hash",
 ]
 
+# Canonical PyArrow schema — pinning created_dt to timestamp[us, tz=UTC]
+# prevents schema-mismatch crashes when pandas infers nanosecond precision
+# for some sources, which PyArrow's ParquetWriter rejects after the first write.
+SILVER_SCHEMA = pa.schema([
+    pa.field("doc_id",          pa.large_utf8()),
+    pa.field("source",          pa.large_utf8()),
+    pa.field("category",        pa.large_utf8()),
+    pa.field("domain",          pa.large_utf8()),
+    pa.field("url",             pa.large_utf8()),
+    pa.field("title",           pa.large_utf8()),
+    pa.field("text",            pa.large_utf8()),
+    pa.field("text_length",     pa.int64()),
+    pa.field("author",          pa.large_utf8()),
+    pa.field("created_dt",      pa.timestamp("us", tz="UTC")),
+    pa.field("crawl_partition", pa.large_utf8()),
+    pa.field("ingested_at",     pa.large_utf8()),
+    pa.field("content_hash",    pa.large_utf8()),
+])
+
 
 def _make_doc_id(source: str, identifier: str, text_prefix: str) -> str:
     raw = f"{source}:{identifier}:{text_prefix[:64]}"
@@ -535,7 +554,7 @@ class BronzeToSilverPipeline:
             return pd.DataFrame()
 
         df = pd.DataFrame(docs, columns=SILVER_COLUMNS)
-        df["created_dt"] = pd.to_datetime(df["created_dt"], errors="coerce", utc=True)
+        df["created_dt"] = pd.to_datetime(df["created_dt"], errors="coerce", utc=True).dt.as_unit("us")
 
         out = self.silver_root / f"{source.replace('/', '_')}.parquet"
         df.to_parquet(out, index=False, engine="pyarrow")
@@ -551,22 +570,22 @@ class BronzeToSilverPipeline:
             "stackoverflow", "mastodon", "substack", "github",
         ]
         out = self.silver_root / "combined.parquet"
-        writer = None
+        writer = pq.ParquetWriter(out, SILVER_SCHEMA)
         total = 0
 
-        for src in sources:
-            df = self.process_source(src)
-            if df.empty:
-                continue
-            table = pa.Table.from_pandas(df, preserve_index=False)
-            if writer is None:
-                writer = pq.ParquetWriter(out, table.schema)
-            writer.write_table(table)
-            total += len(df)
-            del df, table  # free each source's memory before loading the next
-
-        if writer:
+        try:
+            for src in sources:
+                df = self.process_source(src)
+                if df.empty:
+                    continue
+                table = pa.Table.from_pandas(df, schema=SILVER_SCHEMA, preserve_index=False)
+                writer.write_table(table)
+                total += len(df)
+                del df, table  # free each source's memory before loading the next
+        finally:
             writer.close()
+
+        if total:
             print(f"\n[PIPELINE] Combined silver: {total:,} records → {out}")
         else:
             print("[PIPELINE] No data to combine")
