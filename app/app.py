@@ -511,11 +511,17 @@ def chart_gauge(score: float) -> go.Figure:
 def chart_timeline(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
-    # Soft band around smoothed
-    upper = df["smoothed_index"] + 4
-    lower = df["smoothed_index"] - 4
+    # Trim last 5 days — smoothed values at the right edge are unreliable
+    # because the rolling window isn't full yet
+    if len(df) > 5:
+        df = df.iloc[:-5].copy()
+
+    # Soft band around smoothed — drop NaN rows so polygon fill has no gaps
+    band = df[["date", "smoothed_index"]].dropna()
+    upper = band["smoothed_index"] + 4
+    lower = band["smoothed_index"] - 4
     fig.add_trace(go.Scatter(
-        x=pd.concat([df["date"], df["date"].iloc[::-1]]),
+        x=pd.concat([band["date"], band["date"].iloc[::-1]]),
         y=pd.concat([upper, lower.iloc[::-1]]),
         fill="toself",
         fillcolor=f"rgba(30,58,95,0.06)",
@@ -577,7 +583,9 @@ def chart_timeline(df: pd.DataFrame) -> go.Figure:
             tickformat="%b '%y", tickfont=dict(size=10, family="Inter"),
         ),
         yaxis=dict(
-            range=[20, 95], showgrid=True, gridcolor=P["border_soft"],
+            range=[max(0, float(df["smoothed_index"].min()) - 8),
+                   min(100, float(df["smoothed_index"].max()) + 8)],
+            showgrid=True, gridcolor=P["border_soft"],
             zeroline=False, tickfont=dict(size=10, family="Inter"),
         ),
         legend=dict(
