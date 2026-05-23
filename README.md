@@ -1,10 +1,10 @@
-# ☠ Dead Internet Observatory
+# Dead Internet Observatory
 
 **Tracking and quantifying the synthetic takeover of the public internet**
 
-The [Dead Internet Theory](https://en.wikipedia.org/wiki/Dead_Internet_theory) says the internet is increasingly populated by bots, AI-generated content, and automated engagement farms rather than real humans.
+The [Dead Internet Theory](https://en.wikipedia.org/wiki/Dead_Internet_theory) holds that the internet is increasingly populated by bots, AI-generated content, and automated engagement farms rather than real humans.
 
-This project is a living observatory that computes an **Internet Aliveness Index (IAI)** — a 0–100 score measuring how much of the sampled public internet still looks authentically human. Pulling from 14 data sources, running a battery of statistical detection signals on every document, aggregating everything into a daily index, and serving it through a research-grade Streamlit dashboard.
+This project is a living observatory that computes an **Internet Aliveness Index (IAI)** — a 0–100 score measuring how much of the sampled public internet still looks authentically human. Bots pull from 14 data sources, run a battery of statistical detection signals on every document, and aggregate everything into a daily index served through a Streamlit dashboard.
 
 No LLMs, no paid APIs, no subscriptions. 100% open source and free to run.
 
@@ -14,12 +14,9 @@ No LLMs, no paid APIs, no subscriptions. 100% open source and free to run.
 
 > Live at: **[dead-internet-observatory-8ryn4twqetgroo5xvrivm5.streamlit.app](https://dead-internet-observatory-8ryn4twqetgroo5xvrivm5.streamlit.app/)**
 
-- Animated IAI gauge with live score and delta vs. 2019 baseline
-- Multi-year timeline with anomaly markers and decay shading
-- Platform health bars across all 14 active sources
-- Detection signal radar chart
-- Anomaly spotlight: statistically significant spikes and crashes
-- **What-if Simulator** — project future aliveness under different AI acceleration scenarios
+- IAI gauge with live score and delta vs. 2019 baseline
+- Platform health bars across all active sources
+- Methodology and signal weights
 
 ---
 
@@ -56,35 +53,29 @@ All signals are statistical. No external model calls, no GPU required. Everythin
 |                               PIPELINE                                    |
 |  Bronze (raw JSONL) -> Silver (normalised Parquet)                        |
 |                     -> Gold (scored Parquet, 3000 docs/run cap)           |
-|                     -> SQLite (daily index aggregates -> git)             |
+|                     -> Supabase sync (daily index aggregates)             |
 +-------------+-----------------------------+-----------------------------+
-              | Parquet -> HF Datasets      | observatory.db -> git repo
+              | Parquet -> HF Datasets      | Supabase (source of truth)
               v                             v
 +--------------------+         +-------------------------------------+
 |  HuggingFace       |         |  Streamlit Community Cloud          |
-|  Datasets          |         |  (research dashboard)               |
+|  Datasets          |         |  (reads Supabase REST API)          |
 |  (public, free)    |         |                                     |
 +--------------------+         +-------------------------------------+
-                                             ^
-                               +-------------------------------------+
-                               |  Supabase (Postgres)                |
-                               |  doc registry · index sync          |
-                               |  scored-doc dedup                   |
-                               +-------------------------------------+
 ```
 
 GitHub Actions runs the full cycle autonomously. No server required.
 
 ```
 01:00 UTC daily   ->  Wayback Machine
-02:00 UTC daily   ->  Common Crawl (5 CC dates/run, 2012–2025 backfill)
+02:00 UTC daily   ->  Common Crawl (5 CC dates/run, backfill)
 10:00 UTC daily   ->  Common Crawl (repeat)
 18:00 UTC daily   ->  Common Crawl (repeat)
 03:00 UTC daily   ->  Reddit
 03:30 UTC daily   ->  News Crawler
 04:00 UTC daily   ->  Wikipedia + HackerNews
-05:00 UTC daily   ->  Daily Full Sweep (all fast minions)
-06:00 UTC daily   ->  Pipeline (bronze->silver->gold->index)
+05:00 UTC daily   ->  Daily Full Sweep (fast minions)
+06:00 UTC daily   ->  Pipeline (bronze->silver->gold->Supabase)
 06:00 UTC daily   ->  Stack Overflow
 06:30 UTC daily   ->  Bluesky
 07:00 UTC daily   ->  4chan + Steam
@@ -104,7 +95,7 @@ GitHub Actions runs the full cycle autonomously. No server required.
 
 | Minion | Source | What we collect | Status |
 |---|---|---|---|
-| `common_crawl_bot` | [Common Crawl](https://commoncrawl.org) | Quarterly WET snapshots, raw web text, 2012–2025 backfill | ✓ |
+| `common_crawl_bot` | [Common Crawl](https://commoncrawl.org) | Quarterly WET snapshots, raw web text, multi-year backfill | ✓ |
 | `reddit_bot` | Reddit public JSON API | Posts + comment trees from 10 subreddits | ✓ |
 | `news_crawler_bot` | 8 RSS feeds | Full article text from major news outlets | ✓ |
 | `wikipedia_bot` | Wikipedia API | 500 random articles + 24h edit pattern tracking | ✓ |
@@ -114,7 +105,7 @@ GitHub Actions runs the full cycle autonomously. No server required.
 | `fourchan_bot` | 4chan JSON API | Posts from 8 boards | ✓ |
 | `steam_bot` | Steam Reviews API | Reviews across 16 popular games | ✓ |
 | `youtube_bot` | YouTube Data API v3 | Comments across 5 topic searches, 3× daily | ✓ |
-| `linkedin_bot` | LinkedIn public feeds | Article text, 3× daily | ✓ |
+| `linkedin_bot` | LinkedIn public feeds | Article text | ✓ |
 | `stackoverflow_bot` | StackExchange API v2.3 | Q&A across 10 tags | ✓ |
 | `mastodon_bot` | 5 Mastodon instances | Public timelines + 5 tag streams | ✓ |
 | `github_bot` | GitHub REST API | README + top issues from trending repos | ✓ |
@@ -124,7 +115,7 @@ GitHub Actions runs the full cycle autonomously. No server required.
 **Where data lives:**
 - Raw JSONL (bronze) → GitHub Artifacts, 7-day retention
 - Processed Parquet (silver/gold) → [HuggingFace Datasets](https://huggingface.co/datasets/jupiternull/dead-internet-observatory)
-- Daily index aggregates → `data/observatory.db` in this repo (what the dashboard reads)
+- Daily index aggregates → Supabase (`composite_index`, `daily_index`, `meta`)
 - Scored doc registry → Supabase `doc_registry` (dedup, all-time count)
 
 ---
@@ -135,11 +126,10 @@ GitHub Actions runs the full cycle autonomously. No server required.
 git clone https://github.com/jupiternull/dead-internet-observatory
 cd dead-internet-observatory
 pip install -r requirements.txt
-
-# Populate with synthetic demo data and launch the dashboard
-python3 analytics/aliveness_index.py --seed-demo
 streamlit run app/app.py
 ```
+
+The dashboard reads from Supabase by default. To run data collection locally, see below.
 
 ---
 
@@ -173,12 +163,12 @@ python3 -m pipeline.silver_processing
 **Streamlit Community Cloud (free):**
 1. Fork this repo
 2. Go to [share.streamlit.io](https://share.streamlit.io) → New app → point to `app/app.py`
-3. Add `DATABASE_URL` to app secrets (Supabase connection string)
+3. No secrets needed — dashboard reads Supabase via public REST API
 4. Done — auto-deploys on every push
 
 **Activating autonomous data collection (GitHub Actions):**
 1. Push to GitHub — cron schedules activate automatically
-2. Add `DATABASE_URL` secret in repo Settings → Secrets (Supabase)
+2. Add `DATABASE_URL` secret in repo Settings → Secrets (Supabase connection string)
 3. *(Optional)* Add `HF_TOKEN` for HuggingFace dataset sync
 4. *(Optional)* Add `YOUTUBE_API_KEY`, `STACKOVERFLOW_API_KEY`, `GITHUB_TOKEN` for those minions
 
@@ -195,7 +185,7 @@ dead-internet-observatory/
 ├── app/               # Streamlit dashboard
 ├── scripts/           # HuggingFace push, Supabase migration helpers
 ├── config/            # config.yaml — all tuneable parameters
-└── .github/workflows/ # 18 autonomous GitHub Actions workflows
+└── .github/workflows/ # Autonomous GitHub Actions workflows
 ```
 
 ---
@@ -207,7 +197,7 @@ This is a living project. A few things that would move the needle:
 - **Better signal weights** — calibrate against labeled human/AI datasets (HC3, RAID, M4 on HF)
 - **New minions** — Internet Archive bulk data, academic paper feeds, forum scrapers
 - **KenLM perplexity scoring** — train a 3-gram model on pre-2022 Common Crawl; score new text against it
-- **Dashboard improvements** — domain-level leaderboard, country-level breakdowns, embed widget
+- **Anomaly alerts** — webhook or email when the IAI drops more than X points in a day
 
 Open an issue or send a PR.
 
