@@ -831,7 +831,7 @@ def main():
     <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:1.05rem;
               color:{P['ink_mid']};max-width:640px;margin:0.25rem 0 1.5rem;line-height:1.65">
       A growing share of what you read online was not written by a person.
-      This index uses automated bots that continuously scrape the web to track the data.
+      This index deploys bots across the internet to continuously measure the shift.
     </p>
     """, unsafe_allow_html=True)
 
@@ -857,29 +857,32 @@ def main():
     st.markdown('<hr class="section-rule"><div class="section-label">Methodology</div>',
                 unsafe_allow_html=True)
 
-    with st.expander("How the Internet Aliveness Index is computed", expanded=False):
-        st.markdown(f"""
-        <div class="method-box">
-        The <b>Internet Aliveness Index (IAI)</b> is a composite 0–100 score derived from seven
-        statistical signals computed on every harvested document. No external AI models are called —
-        all detection is performed with classical NLP and information theory.<br><br>
+    st.markdown(f"""
+    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
+              color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
+      How the Internet Aliveness Index is computed.
+    </p>
+    <div class="method-box">
+    The <b>Internet Aliveness Index (IAI)</b> is a composite 0–100 score derived from seven
+    statistical signals computed on every harvested document. No external AI models are called —
+    all detection is performed with classical NLP and information theory.<br><br>
 
-        <b>Signal weights:</b><br>
-        Type-Token Ratio (18%) · Shannon Entropy (15%) · Sentence Length Variance (15%) ·
-        Bigram Repetition (15%) · Temporal Burstiness — Goh-Barabási (15%) ·
-        MTLD Lexical Diversity (12%) · Zipf Law Alignment (10%)<br><br>
+    <b>Signal weights:</b><br>
+    Type-Token Ratio (18%) · Shannon Entropy (15%) · Sentence Length Variance (15%) ·
+    Bigram Repetition (15%) · Temporal Burstiness — Goh-Barabási (15%) ·
+    MTLD Lexical Diversity (12%) · Zipf Law Alignment (10%)<br><br>
 
-        <b>Sources:</b> Common Crawl WET extracts · Reddit public JSON API · RSS news feeds ·
-        Wikipedia API · Hacker News via Algolia · Internet Archive Wayback Machine ·
-        Bluesky public firehose · 4chan public API · Steam review API ·
-        YouTube public data · LinkedIn public posts · Twitter/X public data<br><br>
+    <b>Sources:</b> Common Crawl WET extracts · Reddit public JSON API · RSS news feeds ·
+    Wikipedia API · Hacker News via Algolia · Internet Archive Wayback Machine ·
+    Bluesky public firehose · 4chan public API · Steam review API ·
+    YouTube public data · LinkedIn public posts · Twitter/X public data<br><br>
 
-        <b>Data architecture:</b> Bronze (raw JSONL via GitHub Artifacts) → Silver (normalised Parquet) →
-        Gold (scored Parquet + SQLite index). All source code and data at
-        <a href="https://github.com/jupiternull/dead-internet-observatory" style="color:{P['navy']}">
-        github.com/jupiternull/dead-internet-observatory</a>
-        </div>
-        """, unsafe_allow_html=True)
+    <b>Data architecture:</b> Bronze (raw JSONL via GitHub Artifacts) → Silver (normalised Parquet) →
+    Gold (scored Parquet + SQLite index). All source code and data at
+    <a href="https://github.com/jupiternull/dead-internet-observatory" style="color:{P['navy']}">
+    github.com/jupiternull/dead-internet-observatory</a>
+    </div>
+    """, unsafe_allow_html=True)
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(f"""
