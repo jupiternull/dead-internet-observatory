@@ -253,11 +253,11 @@ class CommonCrawlMinion(BaseMinion):
 
                 self.throttle(3.0)   # respectful delay between large files
 
-        # Mark this date done after each one (survives partial runs)
-        if not dry_run:
-            done.add(crawl_id)
-            self._save_progress(done)
-            self.logger.info(f"✓ {crawl_id} complete ({len(done)}/{len(all_ids)})")
+            # Mark this date done after each one (survives partial runs)
+            if not dry_run:
+                done.add(crawl_id)
+                self._save_progress(done)
+                self.logger.info(f"✓ {crawl_id} complete ({len(done)}/{len(all_ids)})")
 
         self.report_stats()
 
