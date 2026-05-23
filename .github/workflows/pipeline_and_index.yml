@@ -14,7 +14,6 @@ on:
       - "🎮 Steam Minion"
       - "📺 YouTube Minion"
       - "💼 LinkedIn Minion"
-      - "🐦 Twitter/X Minion"
       - "🌐 Daily Full Sweep"
       - "🔢 Stack Overflow Minion"
       - "🐘 Mastodon Minion"
@@ -75,6 +74,20 @@ jobs:
             [substack]=substack [github]=github
           )
           PATTERN='^(reddit|news|wikipedia|hn|wayback|commoncrawl|bluesky|fourchan|steam|youtube|linkedin|twitter|stackoverflow|mastodon|substack|github|sweep)-bronze-'
+
+          download_artifact() {
+            local artifact_id=$1 dest=$2
+            for attempt in 1 2 3; do
+              sleep $((attempt * 2 - 2))   # 0s, 2s, 4s
+              if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/artifact.zip 2>/tmp/gh_err; then
+                return 0
+              fi
+              echo "    attempt $attempt failed: $(cat /tmp/gh_err)"
+            done
+            echo "WARN: giving up on artifact $artifact_id after 3 attempts — skipping"
+            return 0   # non-fatal: pipeline continues with whatever data it has
+          }
+
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
             | jq -r '[.artifacts[] | select(.expired == false) | select(.name | test("'"$PATTERN"'"))] | group_by(.name | split("-bronze-")[0]) | map(sort_by(.created_at) | last) | .[] | "\(.id) \(.name)"' \
             | while read artifact_id artifact_name; do
@@ -82,8 +95,8 @@ jobs:
                 if [ "$prefix" = "sweep" ]; then
                   echo "==> $artifact_name → data/bronze/ (sweep, all sources)"
                   mkdir -p "data/bronze"
-                  gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/artifact.zip
-                  unzip -o -q /tmp/artifact.zip -d "data/bronze/"
+                  download_artifact "$artifact_id" "data/bronze/"
+                  [ -f /tmp/artifact.zip ] && unzip -o -q /tmp/artifact.zip -d "data/bronze/" || true
                   continue
                 fi
                 target_dir="${DIR_MAP[$prefix]}"
@@ -93,8 +106,8 @@ jobs:
                 fi
                 echo "==> $artifact_name → data/bronze/$target_dir/"
                 mkdir -p "data/bronze/$target_dir"
-                gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/artifact.zip
-                unzip -o -q /tmp/artifact.zip -d "data/bronze/$target_dir/"
+                download_artifact "$artifact_id" "data/bronze/$target_dir/"
+                [ -f /tmp/artifact.zip ] && unzip -o -q /tmp/artifact.zip -d "data/bronze/$target_dir/" || true
               done
           echo "==> Bronze download complete"
           find data/bronze -name "*.jsonl" | wc -l | xargs -I{} echo "  {} JSONL files ready"

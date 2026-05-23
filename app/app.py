@@ -423,22 +423,6 @@ def load_platform_trends() -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300)
-def load_signal_means() -> dict:
-    gold_path = ROOT / "data" / "gold" / "scored.parquet"
-    if not gold_path.exists():
-        return {}
-    try:
-        df = pd.read_parquet(gold_path, columns=[
-            "score_ttr", "score_entropy", "score_sentence_variance",
-            "score_burstiness", "score_zipf_deviation", "score_repetition",
-            "score_mtld",
-        ])
-        return {col: round(float(df[col].mean()) * 100, 1) for col in df.columns if col in df}
-    except Exception:
-        return {}
-
-
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -776,30 +760,6 @@ def render_platform_health_bars(src_df: pd.DataFrame) -> str:
     )
     return f'<div class="health-bar-section">{bars}</div>'
 
-
-def render_anomalies(df: pd.DataFrame):
-    if df.empty or "is_anomaly" not in df.columns:
-        st.markdown("*No significant anomalies detected in the current dataset.*")
-        return
-    anomalies = df[df["is_anomaly"]].sort_values("z_score", ascending=False).head(6)
-    if anomalies.empty:
-        st.markdown("*No significant anomalies in selected window.*")
-        return
-    for _, row in anomalies.iterrows():
-        atype = row.get("anomaly_type", "unknown")
-        date  = pd.to_datetime(row["date"]).strftime("%-d %B %Y")
-        score = float(row.get("aliveness_index", 0))
-        z     = float(row.get("z_score", 0))
-        direction = "Recovery spike" if atype == "spike" else "Aliveness drop"
-        color = P["forest"] if atype == "spike" else P["burgundy"]
-        st.markdown(
-            f'<div class="finding {atype}">'
-            f'<div class="date">{date} &nbsp;·&nbsp; z = {z:+.2f}</div>'
-            f'<span style="color:{color};font-weight:600">{direction}</span>'
-            f' — Index: <span style="font-family:JetBrains Mono,monospace">{score:.1f}</span>'
-            f"</div>",
-            unsafe_allow_html=True,
-        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
