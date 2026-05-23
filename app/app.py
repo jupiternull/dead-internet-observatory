@@ -860,12 +860,12 @@ def main():
     </p>
     <div class="method-box">
     The <b>Internet Aliveness Index (IAI)</b> is a composite 0–100 score derived from seven
-    statistical signals computed on every harvested document. No external AI models are called —
+    statistical signals computed on every harvested document. No external AI models are called;
     all detection is performed with classical NLP and information theory.<br><br>
 
     <b>Signal weights:</b><br>
     Type-Token Ratio (18%) · Shannon Entropy (15%) · Sentence Length Variance (15%) ·
-    Bigram Repetition (15%) · Temporal Burstiness — Goh-Barabási (15%) ·
+    Bigram Repetition (15%) · Temporal Burstiness (Goh-Barabási, 15%) ·
     MTLD Lexical Diversity (12%) · Zipf Law Alignment (10%)<br><br>
 
     <b>Sources:</b> Common Crawl WET extracts · Reddit public JSON API · RSS news feeds ·
