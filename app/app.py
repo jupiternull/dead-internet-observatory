@@ -338,10 +338,6 @@ div.stSelectbox > div > div {{
 
 /* ── Methodology box ── */
 .method-box {{
-    background: {P["card"]};
-    border: 1px solid {P["border_soft"]};
-    border-radius: 4px;
-    padding: 1.2rem 1.5rem;
     font-family: 'Crimson Pro', serif;
     font-size: 0.95rem;
     color: {P["ink_mid"]};
