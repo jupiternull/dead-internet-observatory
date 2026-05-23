@@ -111,8 +111,7 @@ div[data-testid="stVerticalBlock"] {{
 /* Streamlit widget backgrounds */
 [data-testid="stForm"],
 [data-testid="stExpander"],
-div.stSelectbox > div > div,
-div.stSlider {{
+div.stSelectbox > div > div {{
     background-color: {P["card"]} !important;
     border-color: {P["border"]} !important;
 }}
@@ -590,65 +589,6 @@ def chart_timeline(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def chart_projection(df: pd.DataFrame, years: float, accel: float) -> go.Figure:
-    if df.empty:
-        return go.Figure()
-
-    # Slope derived from the same formula as the stat card: -2 pts/yr baseline + accel
-    # Avoids polyfit on sparse historical data, keeps chart and stat card consistent
-    slope = (accel - 2.0) / 365.0
-
-    last_date  = df["date"].max()
-    last_score = float(df["smoothed_index"].iloc[-1])
-    n = int(years * 365)
-    proj_dates  = [last_date + timedelta(days=i) for i in range(1, n + 1)]
-    proj_scores = np.clip([last_score + slope * i for i in range(1, n + 1)], 0, 100)
-    uncertainty = np.sqrt(np.arange(1, n + 1)) * 0.35
-    upper = np.clip(proj_scores + uncertainty, 0, 100)
-    lower = np.clip(proj_scores - uncertainty, 0, 100)
-
-    proj_color = P["burgundy"] if proj_scores[-1] < 40 else P["rust"] if proj_scores[-1] < 55 else P["gold"]
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["date"].tail(500), y=df["smoothed_index"].tail(500),
-        mode="lines", name="Historical",
-        line=dict(color=P["navy"], width=2),
-    ))
-    fig.add_trace(go.Scatter(
-        x=proj_dates + proj_dates[::-1],
-        y=list(upper) + list(lower[::-1]),
-        fill="toself", fillcolor=f"rgba(107,31,31,0.07)",
-        line_color="rgba(0,0,0,0)", showlegend=False, hoverinfo="skip",
-    ))
-    fig.add_trace(go.Scatter(
-        x=proj_dates, y=proj_scores,
-        mode="lines", name="Projection",
-        line=dict(color=proj_color, width=2, dash="dash"),
-        hovertemplate="%{x|%b %Y}<br>Projected: %{y:.1f}<extra></extra>",
-    ))
-    end_year = (last_date + timedelta(days=n)).year
-    fig.add_annotation(
-        x=proj_dates[-1], y=proj_scores[-1] + 4,
-        text=f"<b>{proj_scores[-1]:.0f}</b> by {end_year}",
-        font=dict(family="JetBrains Mono", size=11, color=proj_color),
-        showarrow=False,
-    )
-    fig.add_hline(y=68, line_dash="dot", line_color=P["border"])
-    fig.update_layout(
-        **PLOTLY_BASE,
-        height=300,
-        margin=dict(l=40, r=20, t=20, b=40),
-        xaxis=dict(showgrid=True, gridcolor=P["border_soft"], zeroline=False,
-                   tickfont=dict(size=10, family="Inter")),
-        yaxis=dict(range=[0, 100], showgrid=True, gridcolor=P["border_soft"],
-                   zeroline=False, tickfont=dict(size=10, family="Inter")),
-        legend=dict(font=dict(size=10, family="Inter"), bgcolor="rgba(0,0,0,0)"),
-        hovermode="x unified",
-    )
-    return fig
-
-
 def chart_radar(sources_df: pd.DataFrame) -> go.Figure:
     dims = ["Vocabulary\nDiversity", "Sentence\nVariance", "Info\nEntropy",
             "Temporal\nBurstiness", "Zipf\nAlignment", "Non-\nRepetition"]
@@ -1100,57 +1040,6 @@ def main():
           </span>
         </div>
         """, unsafe_allow_html=True)
-
-    # ── Simulator ─────────────────────────────────────────────────────────────
-    st.markdown('<hr class="section-rule"><div class="section-label">Projection Simulator</div>',
-                unsafe_allow_html=True)
-    st.markdown(f"""
-    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
-              color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
-      The trajectory is not fixed. Adjust the parameters below to model what intervention,
-      acceleration, or regulation would mean for the index over the next several years.
-    </p>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <style>
-    .stSlider [data-baseweb="slider"] [role="slider"] {{
-        background-color: {P["gold_light"]} !important;
-        border: 2px solid {P["navy"]} !important;
-    }}
-    .stSlider [data-baseweb="slider"] div[data-testid="stTickBarMin"],
-    .stSlider [data-baseweb="slider"] div[data-testid="stTickBarMax"] {{
-        color: {P["ink_light"]} !important;
-    }}
-    .stSlider [data-baseweb="slider"] div[class*="Bar"] {{
-        background: {P["navy"]} !important;
-    }}
-    .stSlider [data-baseweb="slider"] div[class*="InnerTrack"] {{
-        background: {P["gold"]} !important;
-    }}
-    </style>
-    """, unsafe_allow_html=True)
-
-    ctrl_col, proj_col = st.columns([1, 3])
-    with ctrl_col:
-        st.markdown(f"<div style='font-family:Crimson Pro,serif;font-style:italic;font-size:0.85rem;color:{P['ink_light']};margin-bottom:1rem'>Adjust parameters to model alternative futures</div>", unsafe_allow_html=True)
-        years = st.slider("Projection horizon (years)", 1.0, 5.0, 3.0, 0.5)
-        accel = st.slider("AI acceleration factor", -5.0, 5.0, 0.0, 0.5,
-                          help="Negative = faster synthetic growth · Positive = human resistance/recovery")
-        regulation = st.checkbox("Assume AI content regulation  (+8)")
-        open_web   = st.checkbox("Open-web revival scenario  (+5)")
-        bonus_accel = ((8 if regulation else 0) + (5 if open_web else 0)) / (years * 365)
-        proj_end = round(float(np.clip(score + (accel - 2) * years + (8 if regulation else 0) + (5 if open_web else 0), 0, 100)), 1)
-        proj_color = P["burgundy"] if proj_end < 35 else P["rust"] if proj_end < 50 else P["forest"]
-        st.markdown(f"""
-        <div class="stat-card navy" style="margin-top:1rem">
-          <div class="stat-number" style="color:{proj_color}">{proj_end}</div>
-          <div class="stat-label">Projected score in {years:.0f} yr</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with proj_col:
-        st.plotly_chart(chart_projection(tl_df, years, accel + bonus_accel),
-                        use_container_width=True, config={"displayModeBar": False})
 
     # ── Methodology ───────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Methodology</div>',
