@@ -366,7 +366,7 @@ div.stSelectbox > div > div {{
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=300)
-def load_timeline(days: int = 3000) -> pd.DataFrame:
+def load_timeline(days: int = 3650) -> pd.DataFrame:
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
         data = _sb_get("composite_index", {"date": f"gte.{cutoff}", "order": "date.asc"})
@@ -509,89 +509,96 @@ def chart_gauge(score: float) -> go.Figure:
 
 
 def chart_timeline(df: pd.DataFrame) -> go.Figure:
+    if df.empty:
+        return go.Figure()
+
     fig = go.Figure()
+    n_days = (df["date"].max() - df["date"].min()).days if len(df) > 1 else 0
 
-    # Trim last 5 days — smoothed values at the right edge are unreliable
-    # because the rolling window isn't full yet
-    if len(df) > 5:
-        df = df.iloc[:-5].copy()
+    if n_days > 365:
+        # Monthly median — collapses noise, makes multi-year trend readable
+        plot = (df.set_index("date")["aliveness_index"]
+                  .resample("ME").median()
+                  .dropna()
+                  .reset_index()
+                  .rename(columns={"aliveness_index": "value"}))
+        band_w = 1.5
+        hover_fmt = "%b %Y"
+        show_anomalies = False
+    elif n_days > 90:
+        # Weekly median
+        plot = (df.set_index("date")["aliveness_index"]
+                  .resample("W").median()
+                  .dropna()
+                  .reset_index()
+                  .rename(columns={"aliveness_index": "value"}))
+        band_w = 2
+        hover_fmt = "%d %b %Y"
+        show_anomalies = False
+    else:
+        # Daily — trim last 5 days to avoid rolling-window edge noise
+        daily = df.iloc[:-5].copy() if len(df) > 5 else df.copy()
+        plot = daily[["date", "smoothed_index"]].dropna().rename(columns={"smoothed_index": "value"})
+        band_w = 4
+        hover_fmt = "%d %b %Y"
+        show_anomalies = True
 
-    # Soft band around smoothed — drop NaN rows so polygon fill has no gaps
-    band = df[["date", "smoothed_index"]].dropna()
-    upper = band["smoothed_index"] + 4
-    lower = band["smoothed_index"] - 4
+    # Confidence band
+    upper = plot["value"] + band_w
+    lower = plot["value"] - band_w
     fig.add_trace(go.Scatter(
-        x=pd.concat([band["date"], band["date"].iloc[::-1]]),
+        x=pd.concat([plot["date"], plot["date"].iloc[::-1]]),
         y=pd.concat([upper, lower.iloc[::-1]]),
-        fill="toself",
-        fillcolor=f"rgba(30,58,95,0.06)",
-        line_color="rgba(0,0,0,0)",
-        hoverinfo="skip", showlegend=False,
+        fill="toself", fillcolor="rgba(30,58,95,0.06)",
+        line_color="rgba(0,0,0,0)", hoverinfo="skip", showlegend=False,
     ))
 
-    # Raw daily
+    # Main line
     fig.add_trace(go.Scatter(
-        x=df["date"], y=df["aliveness_index"],
-        mode="lines", name="Daily",
-        line=dict(color=P["border"], width=1),
-        hovertemplate="<b>%{x|%d %b %Y}</b><br>Index: %{y:.1f}<extra></extra>",
-    ))
-
-    # Smoothed
-    fig.add_trace(go.Scatter(
-        x=df["date"], y=df["smoothed_index"],
-        mode="lines", name="Smoothed",
+        x=plot["date"], y=plot["value"],
+        mode="lines", name="Index",
         line=dict(color=P["navy"], width=2.5),
-        hovertemplate="<b>%{x|%d %b %Y}</b><br>Smoothed: <b>%{y:.1f}</b><extra></extra>",
+        hovertemplate=f"<b>%{{x|{hover_fmt}}}</b><br>Index: <b>%{{y:.1f}}</b><extra></extra>",
     ))
 
-    # Anomalies
-    if "is_anomaly" in df.columns:
-        drops  = df[(df["is_anomaly"]) & (df.get("anomaly_type","") == "drop")]
-        spikes = df[(df["is_anomaly"]) & (df.get("anomaly_type","") == "spike")]
+    # Anomaly markers — daily view only
+    if show_anomalies and "is_anomaly" in daily.columns:
+        drops  = daily[(daily["is_anomaly"]) & (daily.get("anomaly_type", "") == "drop")]
+        spikes = daily[(daily["is_anomaly"]) & (daily.get("anomaly_type", "") == "spike")]
         if not drops.empty:
             fig.add_trace(go.Scatter(
-                x=drops["date"], y=drops["aliveness_index"],
-                mode="markers",
+                x=drops["date"], y=drops["aliveness_index"], mode="markers",
                 marker=dict(symbol="triangle-down", size=8, color=P["burgundy"],
                             line=dict(width=1, color=P["burgundy"])),
                 name="Drop", hovertemplate="DROP  %{x|%d %b}<br>%{y:.1f}<extra></extra>",
             ))
         if not spikes.empty:
             fig.add_trace(go.Scatter(
-                x=spikes["date"], y=spikes["aliveness_index"],
-                mode="markers",
+                x=spikes["date"], y=spikes["aliveness_index"], mode="markers",
                 marker=dict(symbol="triangle-up", size=8, color=P["forest"],
                             line=dict(width=1, color=P["forest"])),
                 name="Spike", hovertemplate="SPIKE  %{x|%d %b}<br>%{y:.1f}<extra></extra>",
             ))
 
-    # Reference line
     fig.add_hline(y=68, line_dash="dot", line_color=P["border"],
                   annotation_text="2019 est. baseline",
                   annotation_font=dict(color=P["ink_light"], size=9, family="Inter"))
+    fig.add_hrect(y0=0, y1=35, fillcolor="rgba(107,31,31,0.04)", line_width=0)
 
-    # Danger band
-    fig.add_hrect(y0=0, y1=35, fillcolor=f"rgba(107,31,31,0.04)", line_width=0)
-
+    y_vals = plot["value"].dropna()
     fig.update_layout(
         **PLOTLY_BASE,
         height=320,
         margin=dict(l=40, r=20, t=20, b=40),
-        xaxis=dict(
-            showgrid=True, gridcolor=P["border_soft"], zeroline=False,
-            tickformat="%b '%y", tickfont=dict(size=10, family="Inter"),
-        ),
+        xaxis=dict(showgrid=True, gridcolor=P["border_soft"], zeroline=False,
+                   tickformat="%b '%y", tickfont=dict(size=10, family="Inter")),
         yaxis=dict(
-            range=[max(0, float(df["smoothed_index"].min()) - 8),
-                   min(100, float(df["smoothed_index"].max()) + 8)],
+            range=[max(0, float(y_vals.min()) - 8), min(100, float(y_vals.max()) + 8)],
             showgrid=True, gridcolor=P["border_soft"],
             zeroline=False, tickfont=dict(size=10, family="Inter"),
         ),
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.01, x=0,
-            font=dict(size=10, family="Inter"), bgcolor="rgba(0,0,0,0)",
-        ),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0,
+                    font=dict(size=10, family="Inter"), bgcolor="rgba(0,0,0,0)"),
         hovermode="x unified",
     )
     return fig
@@ -1004,7 +1011,7 @@ def main():
 
     rng_col, _ = st.columns([2, 6])
     with rng_col:
-        window = st.selectbox("Window", ["1 year", "90 days", "30 days", "2 years", "All data"],
+        window = st.selectbox("Window", ["10 years", "5 years", "2 years", "1 year", "90 days", "30 days", "All data"],
                               index=0, label_visibility="collapsed")
     day_map = {"All data": 9999, "10 years": 3650, "5 years": 1825, "2 years": 730, "1 year": 365, "90 days": 90, "30 days": 30}
     cutoff = tl_df["date"].max() - timedelta(days=day_map[window]) if day_map[window] < 9999 else tl_df["date"].min()
