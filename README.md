@@ -12,7 +12,7 @@ No LLMs, no paid APIs, no subscriptions. 100% open source and free to run.
 
 ## The Dashboard
 
-> Live at: **[dead-internet-observatory-8ryn4twqetgroo5xvrivm5.streamlit.app](https://dead-internet-observatory-8ryn4twqetgroo5xvrivm5.streamlit.app/)**
+> Live at: **[dead-internet-observatory.streamlit.app](https://dead-internet-observatory.streamlit.app/)**
 
 - IAI gauge with live score and delta vs. 2019 baseline
 - Platform health bars across all active sources
