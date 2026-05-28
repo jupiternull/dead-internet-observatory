@@ -9,11 +9,15 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -28,24 +32,85 @@ except ImportError:
     ANALYTICS_OK = False
 
 
-_SUPABASE_URL = "https://qwuabrmpudlqngfcxezh.supabase.co"
-_SUPABASE_KEY = (
+_DEFAULT_SUPABASE_URL = "https://qwuabrmpudlqngfcxezh.supabase.co"
+_DEFAULT_SUPABASE_KEY = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
     ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3dWFicm1wdWRscW5nZmN4ZXpoIiwicm9sZSI6"
     "ImFub24iLCJpYXQiOjE3Nzc5NDYxMDIsImV4cCI6MjA5MzUyMjEwMn0"
     ".eTcAx9mcyAdOf4iBymIvpwK-E-Ayg-FKwphoDtzr6Ss"
 )
+_SUPABASE_URL = None
+_SUPABASE_KEY = None
+_SUPABASE_SESSION = None
 
 CACHE_TTL_SECONDS = 21600
 
 
+def _secret(name: str) -> Optional[str]:
+    try:
+        value = st.secrets.get(name)
+        if value:
+            return str(value)
+        supabase = st.secrets.get("supabase", {})
+        value = supabase.get(name) if hasattr(supabase, "get") else None
+        return str(value) if value else None
+    except Exception:
+        return None
+
+
+def _supabase_config() -> tuple[str, str]:
+    global _SUPABASE_URL, _SUPABASE_KEY
+    if _SUPABASE_URL and _SUPABASE_KEY:
+        return _SUPABASE_URL, _SUPABASE_KEY
+
+    _SUPABASE_URL = (
+        _secret("SUPABASE_URL")
+        or _secret("url")
+        or os.getenv("SUPABASE_URL")
+        or _DEFAULT_SUPABASE_URL
+    )
+    _SUPABASE_KEY = (
+        _secret("SUPABASE_ANON_KEY")
+        or _secret("SUPABASE_KEY")
+        or _secret("anon_key")
+        or _secret("key")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("SUPABASE_KEY")
+        or _DEFAULT_SUPABASE_KEY
+    )
+    return _SUPABASE_URL, _SUPABASE_KEY
+
+
+def _supabase_session() -> requests.Session:
+    global _SUPABASE_SESSION
+    if _SUPABASE_SESSION:
+        return _SUPABASE_SESSION
+
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        status=3,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET",),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=4, pool_maxsize=8)
+    session = requests.Session()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    _SUPABASE_SESSION = session
+    return session
+
+
 def _sb_get(table: str, params: dict = None) -> list:
-    import requests
-    r = requests.get(
-        f"{_SUPABASE_URL}/rest/v1/{table}",
-        headers={"apikey": _SUPABASE_KEY, "Authorization": f"Bearer {_SUPABASE_KEY}"},
+    url, key = _supabase_config()
+    r = _supabase_session().get(
+        f"{url.rstrip('/')}/rest/v1/{table}",
+        headers={"apikey": key, "Authorization": f"Bearer {key}"},
         params=params or {},
-        timeout=15,
+        timeout=(5, 20),
     )
     r.raise_for_status()
     return r.json()
@@ -365,70 +430,59 @@ div.stSelectbox > div > div {{
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_timeline(days: int = 3650) -> pd.DataFrame:
-    try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
-        data = _sb_get("composite_index", {
-            "date": f"gte.{cutoff}",
-            "select": "date,aliveness_index,smoothed_index,n_docs,anomaly_flag,anomaly_reason",
-            "order": "date.asc",
-        })
-        df = pd.DataFrame(data)
-        if not df.empty:
-            df["date"] = pd.to_datetime(df["date"])
-            # Drop days with too few docs — CC backfill years that haven't
-            # accumulated enough data yet (1-5 docs) produce meaningless scores
-            # and create noise between the solid 2013-2014 and 2025-2026 clusters
-            df = df[df["n_docs"] >= 20].reset_index(drop=True)
-            return label_anomalies(df, "aliveness_index")
-        return df
-    except Exception:
-        return pd.DataFrame()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    data = _sb_get("composite_index", {
+        "date": f"gte.{cutoff}",
+        "select": "date,aliveness_index,smoothed_index,n_docs,anomaly_flag,anomaly_reason",
+        "order": "date.asc",
+    })
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"])
+        # Drop days with too few docs — CC backfill years that haven't
+        # accumulated enough data yet (1-5 docs) produce meaningless scores
+        # and create noise between the solid 2013-2014 and 2025-2026 clusters
+        df = df[df["n_docs"] >= 20].reset_index(drop=True)
+        return label_anomalies(df, "aliveness_index")
+    return df
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_sources() -> pd.DataFrame:
-    try:
-        return pd.DataFrame(_sb_get("latest_source_scores", {
-            "select": "source,mean_score,n_docs,date",
-        }))
-    except Exception:
-        return pd.DataFrame()
+    return pd.DataFrame(_sb_get("latest_source_scores", {
+        "select": "source,mean_score,n_docs,date",
+    }))
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_score() -> float:
-    try:
-        data = _sb_get("composite_index", {"select": "smoothed_index", "order": "date.desc", "limit": "1"})
-        return float(data[0]["smoothed_index"]) if data else 0.0
-    except Exception:
-        return 0.0
+    data = _sb_get("composite_index", {"select": "smoothed_index", "order": "date.desc", "limit": "1"})
+    if not data:
+        raise RuntimeError("composite_index returned no current score")
+    return float(data[0]["smoothed_index"])
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_total_docs() -> int:
-    try:
-        data = _sb_get("meta", {"key": "eq.total_scored_count", "select": "value"})
-        return int(data[0]["value"]) if data else 0
-    except Exception:
-        return 0
+    data = _sb_get("meta", {"key": "eq.total_scored_count", "select": "value"})
+    if not data:
+        raise RuntimeError("meta.total_scored_count returned no value")
+    return int(data[0]["value"])
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_platform_trends() -> pd.DataFrame:
-    try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
-        data = _sb_get("daily_index", {
-            "source": "in.(reddit,hackernews,bluesky,youtube,fourchan,steam)",
-            "date": f"gte.{cutoff}",
-            "select": "date,source,aliveness_index",
-            "order": "date.asc",
-        })
-        df = pd.DataFrame(data)
-        if not df.empty:
-            df["date"] = pd.to_datetime(df["date"])
-        return df
-    except Exception:
-        return pd.DataFrame()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
+    data = _sb_get("daily_index", {
+        "source": "in.(reddit,hackernews,bluesky,youtube,fourchan,steam)",
+        "date": f"gte.{cutoff}",
+        "select": "date,source,aliveness_index",
+        "order": "date.asc",
+    })
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"])
+    return df
 
 
 
@@ -613,15 +667,17 @@ def render_overall_healthbar(score: float) -> str:
 """
 
 
-def render_masthead(score: float):
+def render_masthead(live: bool = True):
     now = datetime.now(timezone.utc)
+    status = "Live" if live else "Data unavailable"
+    dot_style = "live-dot" if live else ""
     st.markdown(f"""
     <div class="masthead">
       <div class="masthead-eyebrow">Observational Research  ·  Internet Linguistics  ·  Open Data</div>
       <div class="masthead-title">Dead Internet Observatory</div>
       <div class="masthead-subtitle">Tracking the synthetic displacement of human-authored content on the public web</div>
       <div class="masthead-meta">
-        <span><span class="live-dot"></span>Live</span>
+        <span><span class="{dot_style}"></span>{status}</span>
         <span>Internet Aliveness Index</span>
         <span>{now.strftime("%-d %B %Y, %H:%M UTC")}</span>
       </div>
@@ -629,7 +685,7 @@ def render_masthead(score: float):
     """, unsafe_allow_html=True)
 
 
-def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame, total_docs: int = 0):
+def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame, total_docs: Optional[int] = None):
     delta_30 = ""
     delta_color = P["ink_light"]
     if len(df) >= 2:
@@ -639,10 +695,11 @@ def render_stats(df: pd.DataFrame, score: float, src_df: pd.DataFrame, total_doc
             delta_30 = f"{'↑' if d > 0 else '↓'} {abs(d):.1f} vs 30 days prior"
             delta_color = P["forest"] if d > 0 else P["burgundy"]
 
-    n_docs = total_docs or (int(df["n_docs"].sum()) if "n_docs" in df.columns and not df.empty else 0)
-    n_docs_str = f"{n_docs/1e6:.2f}M" if n_docs >= 1e6 else f"{n_docs:,}"
+    n_docs_str = "Unavailable"
+    if total_docs is not None:
+        n_docs_str = f"{total_docs/1e6:.2f}M" if total_docs >= 1e6 else f"{total_docs:,}"
     synth = round(100 - score, 1)
-    min_score = round(float(df["smoothed_index"].min()), 1) if not df.empty else 0
+    min_score = f"{float(df['smoothed_index'].min()):.1f}" if not df.empty else "Unavailable"
 
     st.markdown(f"""
     <div class="stat-grid">
@@ -769,6 +826,16 @@ def render_platform_health_bars(src_df: pd.DataFrame) -> str:
     return f'<div class="health-bar-section">{bars}</div>'
 
 
+def report_load_failure(label: str, exc: Exception, *, critical: bool = False):
+    message = (
+        f"{label} could not be loaded from Supabase after bounded retries. "
+        f"Live data for that section is unavailable. {type(exc).__name__}: {exc}"
+    )
+    if critical:
+        st.error(message)
+    else:
+        st.warning(message)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  MAIN
@@ -783,12 +850,33 @@ def main():
     )
     st.markdown(CSS, unsafe_allow_html=True)
 
-    score    = load_score()
-    tl_df    = load_timeline()
-    src_df   = load_sources()
+    score = None
+    tl_df = pd.DataFrame()
+    src_df = pd.DataFrame()
+    total_docs = None
+
+    try:
+        score = load_score()
+    except Exception as exc:
+        report_load_failure("Current Internet Aliveness Index", exc, critical=True)
+
+    try:
+        tl_df = load_timeline()
+    except Exception as exc:
+        report_load_failure("Historical timeline", exc)
+
+    try:
+        src_df = load_sources()
+    except Exception as exc:
+        report_load_failure("Source aliveness scores", exc)
+
+    try:
+        total_docs = load_total_docs()
+    except Exception as exc:
+        report_load_failure("Document count", exc)
 
     # ── Masthead ──────────────────────────────────────────────────────────────
-    render_masthead(score)
+    render_masthead(live=score is not None)
 
     # ── Lede ─────────────────────────────────────────────────────────────────
     st.markdown(f"""
@@ -799,11 +887,16 @@ def main():
     </p>
     """, unsafe_allow_html=True)
 
-    # ── Overall Healthbar ─────────────────────────────────────────────────────
-    st.markdown(render_overall_healthbar(score), unsafe_allow_html=True)
+    if score is None:
+        st.error(
+            "Current score unavailable. Refusing to render a zero placeholder as live observatory data."
+        )
+    else:
+        # ── Overall Healthbar ─────────────────────────────────────────────────
+        st.markdown(render_overall_healthbar(score), unsafe_allow_html=True)
 
-    # ── Stats ─────────────────────────────────────────────────────────────────
-    render_stats(tl_df, score, src_df, load_total_docs())
+        # ── Stats ─────────────────────────────────────────────────────────────
+        render_stats(tl_df, score, src_df, total_docs)
 
     # ── Platform Health Bars ─────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Platform Aliveness Health</div>',
@@ -815,7 +908,11 @@ def main():
       The bars below show each source's current aliveness score relative to the 0–100 index.
     </p>
     """, unsafe_allow_html=True)
-    st.markdown(render_platform_health_bars(src_df), unsafe_allow_html=True)
+    platform_bars = render_platform_health_bars(src_df)
+    if platform_bars:
+        st.markdown(platform_bars, unsafe_allow_html=True)
+    else:
+        st.warning("Source score data is unavailable; platform health bars are hidden.")
 
     # ── Methodology ───────────────────────────────────────────────────────────
     st.markdown('<hr class="section-rule"><div class="section-label">Methodology</div>',

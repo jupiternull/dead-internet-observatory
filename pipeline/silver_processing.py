@@ -14,7 +14,7 @@ import yaml
 
 from detection.ai_content_detector import score_dataframe, corpus_summary
 from analytics.aliveness_index import AlivenessIndexEngine
-from pipeline.supabase_sync import sync_all, get_scored_doc_ids
+from pipeline.supabase_sync import sync_all, get_existing_doc_ids
 
 MAX_NEW_DOCS = 6_000
 
@@ -42,17 +42,24 @@ class SilverToGoldPipeline:
 
         # ── Load already-scored doc_ids ───────────────────────────────────────
         gold_path = self.gold_root / "scored.parquet"
-        existing_ids = get_scored_doc_ids()
+        local_existing_ids = set()
+        if gold_path.exists():
+            local_existing_ids = set(pd.read_parquet(gold_path, columns=["doc_id"])["doc_id"].dropna())
+
+        candidate_ids = silver_df["doc_id"].dropna().unique().tolist()
+        supabase_existing_ids = get_existing_doc_ids(candidate_ids)
+        existing_ids = local_existing_ids | supabase_existing_ids
+
         if existing_ids:
-            print(f"[GOLD] {len(existing_ids):,} docs already scored in Supabase — skipping")
+            print(
+                f"[GOLD] {len(existing_ids):,} docs already scored "
+                f"({len(local_existing_ids):,} local, {len(supabase_existing_ids):,} Supabase matches)"
+            )
         else:
-            if gold_path.exists():
-                existing_ids = set(pd.read_parquet(gold_path, columns=["doc_id"])["doc_id"])
-                print(f"[GOLD] {len(existing_ids):,} docs already scored (local parquet fallback)")
-            else:
-                print("[GOLD] No prior scored docs found — scoring full silver batch")
+            print("[GOLD] No prior scored docs found — scoring full silver batch")
 
         new_df = silver_df[~silver_df["doc_id"].isin(existing_ids)].copy()
+        new_df = new_df.drop_duplicates(subset=["doc_id"], keep="last")
         print(f"[GOLD] {len(new_df):,} new docs to score")
 
         if new_df.empty:
@@ -106,11 +113,12 @@ class SilverToGoldPipeline:
         else:
             combined = scored
 
+        combined = combined.drop_duplicates(subset=["doc_id"], keep="last")
         combined.to_parquet(gold_path, index=False, engine="pyarrow")
         print(f"[GOLD] ✓ scored.parquet now has {len(combined):,} docs")
 
         # ── Update SQLite index ───────────────────────────────────────────────
-        self.engine.ingest_scored_df(scored)
+        self.engine.ingest_scored_df(combined, replace_affected_dates=True)
         print("[GOLD] ✓ SQLite index updated")
 
         # ── Sync delta to Supabase ────────────────────────────────────────────

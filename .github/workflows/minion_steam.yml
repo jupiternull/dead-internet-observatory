@@ -14,15 +14,16 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: requirements-minions.txt
 
       - name: Install dependencies
-        run: pip install requests pyyaml tqdm feedparser beautifulsoup4 lxml
+        run: pip install -r requirements-minions.txt
 
       - name: Run Steam Minion
         run: python3 -m minions.steam_bot
@@ -30,7 +31,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
 
       - name: Upload bronze data as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: steam-bronze-${{ github.run_id }}
           path: data/bronze/steam/

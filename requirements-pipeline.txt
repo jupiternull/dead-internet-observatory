@@ -1,0 +1,16 @@
+# Bronze -> Silver -> Gold pipeline and Supabase sync.
+requests>=2.31.0
+pyyaml>=6.0.1
+tqdm>=4.66.0
+python-dotenv>=1.0.0
+pandas>=2.2.0
+numpy>=1.26.0
+pyarrow>=15.0.0
+nltk>=3.8.1
+scipy>=1.12.0
+torch
+transformers
+scikit-learn>=1.4.0
+statsmodels>=0.14.1
+psycopg2-binary>=2.9.9
+huggingface_hub>=1.14.0
