@@ -36,6 +36,8 @@ _SUPABASE_KEY = (
     ".eTcAx9mcyAdOf4iBymIvpwK-E-Ayg-FKwphoDtzr6Ss"
 )
 
+CACHE_TTL_SECONDS = 21600
+
 
 def _sb_get(table: str, params: dict = None) -> list:
     import requests
@@ -361,11 +363,15 @@ div.stSelectbox > div > div {{
 #  DATA
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_timeline(days: int = 3650) -> pd.DataFrame:
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
-        data = _sb_get("composite_index", {"date": f"gte.{cutoff}", "order": "date.asc"})
+        data = _sb_get("composite_index", {
+            "date": f"gte.{cutoff}",
+            "select": "date,aliveness_index,smoothed_index,n_docs,anomaly_flag,anomaly_reason",
+            "order": "date.asc",
+        })
         df = pd.DataFrame(data)
         if not df.empty:
             df["date"] = pd.to_datetime(df["date"])
@@ -379,15 +385,17 @@ def load_timeline(days: int = 3650) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_sources() -> pd.DataFrame:
     try:
-        return pd.DataFrame(_sb_get("daily_index"))
+        return pd.DataFrame(_sb_get("latest_source_scores", {
+            "select": "source,mean_score,n_docs,date",
+        }))
     except Exception:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_score() -> float:
     try:
         data = _sb_get("composite_index", {"select": "smoothed_index", "order": "date.desc", "limit": "1"})
@@ -396,7 +404,7 @@ def load_score() -> float:
         return 0.0
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_total_docs() -> int:
     try:
         data = _sb_get("meta", {"key": "eq.total_scored_count", "select": "value"})
@@ -405,7 +413,7 @@ def load_total_docs() -> int:
         return 0
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_platform_trends() -> pd.DataFrame:
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
