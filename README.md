@@ -125,7 +125,7 @@ GitHub Actions runs the full cycle autonomously. No server required.
 ```bash
 git clone https://github.com/jupiternull/dead-internet-observatory
 cd dead-internet-observatory
-pip install -r requirements.txt
+pip install -r requirements-streamlit.txt
 streamlit run app/app.py
 ```
 
@@ -163,14 +163,23 @@ python3 -m pipeline.silver_processing
 **Streamlit Community Cloud (free):**
 1. Fork this repo
 2. Go to [share.streamlit.io](https://share.streamlit.io) → New app → point to `app/app.py`
-3. No secrets needed — dashboard reads Supabase via public REST API
-4. Done — auto-deploys on every push
+3. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` in Streamlit secrets or as environment variables
+4. Use your own Supabase project and anon key for forks; do not depend on the public observatory project
+5. Deploy — Streamlit auto-deploys on every push
 
 **Activating autonomous data collection (GitHub Actions):**
 1. Push to GitHub — cron schedules activate automatically
 2. Add `DATABASE_URL` secret in repo Settings → Secrets (Supabase connection string)
 3. *(Optional)* Add `HF_TOKEN` for HuggingFace dataset sync
 4. *(Optional)* Add `YOUTUBE_API_KEY`, `STACKOVERFLOW_API_KEY`, `GITHUB_TOKEN` for those minions
+
+---
+
+Dependency files are split by runtime:
+- `requirements-streamlit.txt` — dashboard deployment
+- `requirements-minions.txt` — source collectors
+- `requirements-pipeline.txt` — processing, scoring, and Supabase sync
+- `requirements.txt` — full superset kept for existing deployment compatibility
 
 ---
 

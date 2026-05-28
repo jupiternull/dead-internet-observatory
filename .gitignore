@@ -12,6 +12,13 @@ build/
 .venv/
 venv/
 env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 # ── Data — all local data stays out of git ───────────────────────────────────
 # Bronze/Silver/Gold flow through GitHub Artifacts and Hugging Face Datasets.
@@ -20,6 +27,18 @@ data/bronze/
 data/silver/
 data/gold/
 data/observatory.db
+*.zip
+
+# ── Models / caches ──────────────────────────────────────────────────────────
+.cache/
+models/
+model_cache/
+hf_cache/
+huggingface/
+transformers_cache/
+*.pt
+*.pth
+*.safetensors
 
 # ── Env / secrets ─────────────────────────────────────────────────────────────
 .env
@@ -44,3 +63,8 @@ Thumbs.db
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
+logs_*/
+errorlogs/
+
+# ── Agent scratch ────────────────────────────────────────────────────────────
+.claude/

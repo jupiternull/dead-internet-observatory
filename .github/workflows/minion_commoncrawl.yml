@@ -32,15 +32,16 @@ jobs:
     timeout-minutes: 240          # CC files are large; allow 4 hours
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: requirements-minions.txt
 
       - name: Install dependencies
-        run: pip install requests pyyaml tqdm feedparser beautifulsoup4 lxml
+        run: pip install -r requirements-minions.txt
 
       - name: Patch config for this run
         if: ${{ github.event.inputs.crawl_date != '' }}
@@ -62,7 +63,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: commoncrawl-bronze-${{ github.run_id }}
           path: data/bronze/common_crawl/

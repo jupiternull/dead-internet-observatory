@@ -33,6 +33,7 @@ def push(repo_id: str, data_root: Path, token: str):
 
     # Upload all Parquet files from silver and gold layers
     uploaded = 0
+    failed = []
     for layer in ["silver", "gold"]:
         layer_dir = data_root / layer
         if not layer_dir.exists():
@@ -54,6 +55,7 @@ def push(repo_id: str, data_root: Path, token: str):
                 uploaded += 1
             except Exception as exc:
                 print(f"[HF] Upload failed for {rel_path}: {exc}")
+                failed.append(str(rel_path))
 
     # Also upload the SQLite index as a convenience snapshot
     db_path = data_root / "observatory.db"
@@ -71,6 +73,11 @@ def push(repo_id: str, data_root: Path, token: str):
             uploaded += 1
         except Exception as exc:
             print(f"[HF] DB upload failed: {exc}")
+            failed.append("observatory.db")
+
+    if failed:
+        print(f"[HF] Error: {len(failed)} required upload(s) failed: {', '.join(failed)}")
+        sys.exit(1)
 
     print(f"[HF] ✓ Done — {uploaded} files pushed to {repo_id}")
 

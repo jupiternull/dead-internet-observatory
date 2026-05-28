@@ -25,35 +25,36 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 concurrency:
   group: pipeline
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   process:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: requirements-pipeline.txt
 
       - name: Install dependencies
         run: |
-          pip install pandas pyarrow pyyaml numpy scipy scikit-learn nltk huggingface_hub psycopg2-binary torch transformers
+          pip install -r requirements-pipeline.txt
 
       - name: Cache distilgpt2 model
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/huggingface
           key: hf-distilgpt2-v1
@@ -79,6 +80,7 @@ jobs:
           download_artifact() {
             local artifact_id=$1 dest=$2
             for attempt in 1 2 3; do
+              rm -f /tmp/artifact.zip
               sleep $((attempt * 2 - 2))   # 0s, 2s, 4s
               if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/artifact.zip 2>/tmp/gh_err; then
                 return 0
@@ -86,7 +88,8 @@ jobs:
               echo "    attempt $attempt failed: $(cat /tmp/gh_err)"
             done
             echo "WARN: giving up on artifact $artifact_id after 3 attempts — skipping"
-            return 0   # non-fatal: pipeline continues with whatever data it has
+            rm -f /tmp/artifact.zip
+            return 1
           }
 
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
@@ -96,8 +99,9 @@ jobs:
                 if [ "$prefix" = "sweep" ]; then
                   echo "==> $artifact_name → data/bronze/ (sweep, all sources)"
                   mkdir -p "data/bronze"
-                  download_artifact "$artifact_id" "data/bronze/"
-                  [ -f /tmp/artifact.zip ] && unzip -o -q /tmp/artifact.zip -d "data/bronze/" || true
+                  if download_artifact "$artifact_id" "data/bronze/"; then
+                    unzip -o -q /tmp/artifact.zip -d "data/bronze/"
+                  fi
                   continue
                 fi
                 target_dir="${DIR_MAP[$prefix]}"
@@ -107,8 +111,9 @@ jobs:
                 fi
                 echo "==> $artifact_name → data/bronze/$target_dir/"
                 mkdir -p "data/bronze/$target_dir"
-                download_artifact "$artifact_id" "data/bronze/$target_dir/"
-                [ -f /tmp/artifact.zip ] && unzip -o -q /tmp/artifact.zip -d "data/bronze/$target_dir/" || true
+                if download_artifact "$artifact_id" "data/bronze/$target_dir/"; then
+                  unzip -o -q /tmp/artifact.zip -d "data/bronze/$target_dir/"
+                fi
               done
           echo "==> Bronze download complete"
           find data/bronze -name "*.jsonl" | wc -l | xargs -I{} echo "  {} JSONL files ready"
@@ -125,12 +130,22 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ENABLE_PERPLEXITY: "1"
 
+      - name: Check Hugging Face token
+        id: hf_token
+        run: |
+          if [ -n "$HF_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
       # ── Push Parquet datasets to Hugging Face ───────────────────────────────
       - name: Push datasets to Hugging Face
-        if: ${{ env.HF_TOKEN != '' }}
+        if: ${{ steps.hf_token.outputs.present == 'true' }}
         run: |
           python3 scripts/push_to_hf.py --repo jupiternull/dead-internet-observatory
         env:
           PYTHONPATH: ${{ github.workspace }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-

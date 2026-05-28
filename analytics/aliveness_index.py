@@ -120,7 +120,7 @@ class AlivenessIndexEngine:
 
     # ── Index computation ─────────────────────────────────────────────────────
 
-    def ingest_scored_df(self, df: pd.DataFrame):
+    def ingest_scored_df(self, df: pd.DataFrame, replace_affected_dates: bool = False):
         """
         Take a scored silver DataFrame (output of ai_content_detector.score_dataframe)
         and compute daily index values, inserting/replacing rows in SQLite.
@@ -139,7 +139,15 @@ class AlivenessIndexEngine:
 
         df["date"] = df["date"].fillna(datetime.now(timezone.utc).date())
 
+        affected_dates = sorted({str(date) for date in df["date"].dropna().unique()})
+
         with self._conn() as conn:
+            if replace_affected_dates and affected_dates:
+                placeholders = ",".join("?" for _ in affected_dates)
+                conn.execute(f"DELETE FROM daily_index WHERE date IN ({placeholders})", affected_dates)
+                conn.execute(f"DELETE FROM domain_scores WHERE date IN ({placeholders})", affected_dates)
+                conn.execute(f"DELETE FROM composite_index WHERE date IN ({placeholders})", affected_dates)
+
             # Per-source-category daily aggregates
             grp = df.groupby(["date", "source", "category"])
             for (date, source, category), group in grp:
@@ -149,7 +157,7 @@ class AlivenessIndexEngine:
                 conn.execute(
                     """INSERT INTO daily_index VALUES (?,?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(date, source, category) DO UPDATE SET
-                           n_docs          = MAX(daily_index.n_docs, excluded.n_docs),
+                           n_docs          = excluded.n_docs,
                            mean_score      = excluded.mean_score,
                            median_score    = excluded.median_score,
                            std_score       = excluded.std_score,
@@ -181,7 +189,7 @@ class AlivenessIndexEngine:
                            ON CONFLICT(date, domain) DO UPDATE SET
                                category   = excluded.category,
                                mean_score = excluded.mean_score,
-                               n_docs     = MAX(domain_scores.n_docs, excluded.n_docs)""",
+                               n_docs     = excluded.n_docs""",
                         (str(date), domain, cat,
                          round(float(scores.mean()), 3), len(group))
                     )
@@ -196,6 +204,8 @@ class AlivenessIndexEngine:
             rows = conn.execute("SELECT date, source, mean_score, n_docs FROM daily_index").fetchall()
 
         if not rows:
+            with self._conn() as conn:
+                conn.execute("DELETE FROM composite_index")
             return
 
         df = pd.DataFrame([dict(r) for r in rows])
@@ -244,13 +254,14 @@ class AlivenessIndexEngine:
         )
 
         with self._conn() as conn:
+            conn.execute("DELETE FROM composite_index")
             for _, row in composite.iterrows():
                 conn.execute(
                     """INSERT INTO composite_index VALUES (?,?,?,?,?,?)
                        ON CONFLICT(date) DO UPDATE SET
                            aliveness_index = excluded.aliveness_index,
                            smoothed_index  = excluded.smoothed_index,
-                           n_docs          = MAX(composite_index.n_docs, excluded.n_docs),
+                           n_docs          = excluded.n_docs,
                            anomaly_flag    = excluded.anomaly_flag,
                            anomaly_reason  = excluded.anomaly_reason""",
                     (

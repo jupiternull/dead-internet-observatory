@@ -97,7 +97,8 @@ def get_notable_anomalies(df: pd.DataFrame, top_n: int = 10) -> List[Dict]:
         return []
 
     anomalies = df[df["is_anomaly"]].copy()
-    anomalies = anomalies.nlargest(top_n, "z_score", keep="all")
+    anomalies["_abs_z_score"] = anomalies["z_score"].abs()
+    anomalies = anomalies.nlargest(top_n, "_abs_z_score", keep="all")
 
     result = []
     for _, row in anomalies.iterrows():
