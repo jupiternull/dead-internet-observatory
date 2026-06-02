@@ -2,7 +2,7 @@
 Dead Internet Observatory — Streamlit Dashboard
 Research-grade interface tracking the Internet Aliveness Index.
 
-Aesthetic: observatory meets scholar's study — parchment, ink, brass, and starlight.
+Aesthetic: dark terminal observatory — slate, cyan signal, coral warning.
 """
 
 import os
@@ -121,34 +121,35 @@ def _sb_get(table: str, params: dict = None) -> list:
 # ══════════════════════════════════════════════════════════════════════════════
 
 P = {
-    "bg":          "#F2EDE4",   # parchment
-    "bg_dark":     "#E8E0D3",   # slightly darker parchment
-    "card":        "#FAF7F2",   # near-white paper
-    "border":      "#D4C9B8",   # warm border
-    "border_soft": "#E4DDD0",   # very soft border
+    "bg":          "#111111",
+    "bg_dark":     "#1e2228",
+    "card":        "#111111",
+    "card_alt":    "#282c34",
+    "border":      "#355a66",
+    "border_soft": "#2a4650",
 
-    "ink":         "#1C1812",   # near-black ink
-    "ink_mid":     "#4A3F32",   # medium brown ink
-    "ink_light":   "#8C7B68",   # faded ink
+    "ink":         "#9cdef2",
+    "ink_mid":     "#b9e6f4",
+    "ink_light":   "#6b8a94",
 
-    "navy":        "#1E3A5F",   # observatory navy
-    "navy_light":  "#2E5490",   # lighter navy
-    "burgundy":    "#6B1F1F",   # study leather
-    "forest":      "#1B4332",   # wizard's grove
-    "gold":        "#9A7B2F",   # antique brass
-    "gold_light":  "#C4A24D",   # polished brass
-    "purple":      "#3D2B5E",   # mystic dusk
-    "rust":        "#7A3B1E",   # aged copper
+    "navy":        "#9cdef2",
+    "navy_light":  "#b9e6f4",
+    "burgundy":    "#e06c75",
+    "forest":      "#50fa7b",
+    "gold":        "#f0ad4e",
+    "gold_light":  "#ffd28a",
+    "purple":      "#b48ead",
+    "rust":        "#f0989e",
 
-    "good":        "#1B4332",   # forest green for high scores
-    "warn":        "#7A5C00",   # amber for mid scores
-    "bad":         "#6B1F1F",   # burgundy for low scores
+    "good":        "#50fa7b",
+    "warn":        "#f0ad4e",
+    "bad":         "#e06c75",
 }
 
 PLOTLY_BASE = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Georgia, 'Times New Roman', serif", color=P["ink_mid"]),
+    font=dict(family="'Fira Code', 'JetBrains Mono', monospace", color=P["ink_mid"]),
 )
 
 
@@ -158,13 +159,16 @@ PLOTLY_BASE = dict(
 
 CSS = f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ── Base ── */
 html, body {{
     background-color: {P["bg"]} !important;
     color: {P["ink"]} !important;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
+}}
+html {{
+    color-scheme: dark;
 }}
 /* Streamlit root containers (works across versions) */
 .stApp,
@@ -175,16 +179,29 @@ section[data-testid="stSidebar"],
 div[data-testid="stVerticalBlock"] {{
     background-color: {P["bg"]} !important;
 }}
+.stApp {{
+    background:
+        radial-gradient(1100px 520px at 82% -10%, rgba(224,108,117,0.08), transparent 60%),
+        radial-gradient(900px 520px at 0% 0%, rgba(53,90,102,0.18), transparent 55%),
+        radial-gradient(circle, rgba(156,222,242,0.055) 1px, transparent 1.4px),
+        {P["bg"]} !important;
+    background-size: cover, cover, 24px 24px, auto !important;
+}}
 /* Streamlit widget backgrounds */
 [data-testid="stForm"],
 [data-testid="stExpander"],
-div.stSelectbox > div > div {{
+div.stSelectbox > div > div,
+[data-testid="stSelectbox"] > div,
+[data-testid="stSelectbox"] div[role="combobox"],
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {{
     background-color: {P["card"]} !important;
     border-color: {P["border"]} !important;
+    color: {P["ink"]} !important;
 }}
 /* Text color propagation */
-.stApp, .stApp p, .stApp span, .stApp label,
-.stMarkdown p, .stMarkdown span {{
+.stApp, .stApp p, .stApp label,
+.stMarkdown p, .stMarkdown li {{
     color: {P["ink"]} !important;
 }}
 #MainMenu, footer, header {{ visibility: hidden; }}
@@ -195,41 +212,55 @@ div.stSelectbox > div > div {{
 }}
 ::-webkit-scrollbar {{ width: 5px; }}
 ::-webkit-scrollbar-track {{ background: {P["bg_dark"]}; }}
-::-webkit-scrollbar-thumb {{ background: {P["border"]}; border-radius: 3px; }}
+::-webkit-scrollbar-thumb {{ background: {P["navy"]}; border-radius: 3px; }}
+a, a:visited {{
+    color: {P["navy_light"]} !important;
+    text-decoration-color: rgba(156, 222, 242, 0.45) !important;
+}}
+[data-testid="stAlert"] {{
+    background: rgba(17, 17, 17, 0.92) !important;
+    border: 1px solid {P["border"]} !important;
+    color: {P["ink"]} !important;
+}}
 
 /* ── Masthead ── */
 .masthead {{
-    border-bottom: 2px solid {P["ink"]};
-    padding-bottom: 1.2rem;
+    background: {P["card"]};
+    border: 1px solid {P["border"]};
+    border-radius: 8px;
+    padding: 1.4rem 1.6rem;
     margin-bottom: 2rem;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
 }}
 .masthead-eyebrow {{
-    font-family: 'Inter', sans-serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 0.65rem;
     font-weight: 600;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: {P["ink_light"]};
+    color: {P["burgundy"]};
     margin-bottom: 0.3rem;
+    text-shadow: 0 2px 20px rgba(0, 0, 0, 0.45);
 }}
 .masthead-title {{
-    font-family: 'Crimson Pro', serif;
-    font-size: 2.6rem;
-    font-weight: 300;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 2.75rem;
+    font-weight: 700;
     color: {P["ink"]};
-    letter-spacing: 0.03em;
+    letter-spacing: -0.01em;
     line-height: 1;
     margin: 0;
+    text-shadow: 0 2px 20px rgba(0, 0, 0, 0.45);
 }}
 .masthead-subtitle {{
-    font-family: 'Crimson Pro', serif;
-    font-style: italic;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
+    font-style: normal;
     font-size: 1rem;
     color: {P["ink_light"]};
     margin-top: 0.3rem;
 }}
 .masthead-meta {{
-    font-family: 'Inter', sans-serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 0.7rem;
     color: {P["ink_light"]};
     letter-spacing: 0.05em;
@@ -243,6 +274,7 @@ div.stSelectbox > div > div {{
     width: 7px; height: 7px;
     border-radius: 50%;
     background: {P["forest"]};
+    box-shadow: 0 0 8px {P["forest"]};
     margin-right: 5px;
     animation: blink 2.5s ease-in-out infinite;
 }}
@@ -256,14 +288,15 @@ div.stSelectbox > div > div {{
     border: none;
     border-top: 1px solid {P["border"]};
     margin: 2rem 0 1rem 0;
+    box-shadow: 0 -1px 0 rgba(156, 222, 242, 0.08);
 }}
 .section-label {{
-    font-family: 'Inter', sans-serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 0.62rem;
     font-weight: 600;
     letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: {P["ink_light"]};
+    color: {P["burgundy"]};
     margin-bottom: 1rem;
 }}
 
@@ -271,38 +304,38 @@ div.stSelectbox > div > div {{
 .stat-grid {{ display: flex; gap: 1rem; margin-bottom: 1.5rem; }}
 .stat-card {{
     background: {P["card"]};
-    border: 1px solid {P["border_soft"]};
-    border-radius: 4px;
-    padding: 1rem 1.2rem;
+    border: 1px solid {P["border"]};
+    border-radius: 8px;
+    padding: 1.15rem 1.25rem;
     flex: 1;
     position: relative;
+    box-shadow: none;
 }}
 .stat-card::before {{
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 2px;
-    border-radius: 4px 4px 0 0;
+    height: 3px;
+    border-radius: 8px 8px 0 0;
 }}
 .stat-card.navy::before  {{ background: {P["navy"]}; }}
-.stat-card.forest::before {{ background: {P["forest"]}; }}
 .stat-card.burgundy::before {{ background: {P["burgundy"]}; }}
-.stat-card.gold::before {{ background: {P["gold"]}; }}
-.stat-card.purple::before {{ background: {P["purple"]}; }}
+.stat-card.gold::before {{ background: {P["burgundy"]}; }}
+.stat-card.purple::before {{ background: {P["burgundy"]}; }}
 .stat-number {{
     font-family: 'JetBrains Mono', monospace;
-    font-size: 1.9rem;
+    font-size: 2.05rem;
     font-weight: 500;
     line-height: 1;
     color: {P["ink"]};
+    text-shadow: 0 2px 20px rgba(0, 0, 0, 0.45);
 }}
 .stat-number.navy  {{ color: {P["navy"]}; }}
-.stat-number.forest {{ color: {P["forest"]}; }}
 .stat-number.burgundy {{ color: {P["burgundy"]}; }}
-.stat-number.gold {{ color: {P["gold"]}; }}
-.stat-number.purple {{ color: {P["purple"]}; }}
+.stat-number.gold {{ color: {P["navy"]}; }}
+.stat-number.purple {{ color: {P["navy"]}; }}
 .stat-label {{
-    font-family: 'Inter', sans-serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 0.65rem;
     font-weight: 500;
     letter-spacing: 0.1em;
@@ -311,8 +344,8 @@ div.stSelectbox > div > div {{
     margin-top: 0.35rem;
 }}
 .stat-note {{
-    font-family: 'Crimson Pro', serif;
-    font-style: italic;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
+    font-style: normal;
     font-size: 0.8rem;
     color: {P["ink_light"]};
     margin-top: 0.2rem;
@@ -323,10 +356,10 @@ div.stSelectbox > div > div {{
     background: {P["card"]};
     border: 1px solid {P["border_soft"]};
     border-left: 3px solid {P["navy"]};
-    border-radius: 0 4px 4px 0;
+    border-radius: 0 8px 8px 0;
     padding: 0.75rem 1rem;
     margin: 0.4rem 0;
-    font-family: 'Crimson Pro', serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 0.95rem;
     color: {P["ink_mid"]};
 }}
@@ -345,7 +378,7 @@ div.stSelectbox > div > div {{
     align-items: center;
     padding: 0.5rem 0;
     border-bottom: 1px solid {P["border_soft"]};
-    font-family: 'Inter', sans-serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 0.82rem;
 }}
 .source-name {{
@@ -382,7 +415,7 @@ div.stSelectbox > div > div {{
 }}
 .hbar-label {{
     width: 130px;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 0.68rem;
     font-weight: 600;
     letter-spacing: 0.12em;
@@ -405,10 +438,14 @@ div.stSelectbox > div > div {{
 
 /* ── Methodology box ── */
 .method-box {{
-    font-family: 'Crimson Pro', serif;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 0.95rem;
     color: {P["ink_mid"]};
     line-height: 1.65;
+    background: {P["card"]};
+    border: 1px solid {P["border"]};
+    padding: 1rem 1.1rem;
+    border-radius: 8px;
 }}
 
 /* ── Score pill ── */
@@ -419,6 +456,37 @@ div.stSelectbox > div > div {{
     padding: 2px 8px;
     border-radius: 2px;
     margin-left: 6px;
+}}
+
+.terminal-panel {{
+    background: {P["card"]};
+    border: 1px solid {P["border"]};
+    border-radius: 8px;
+    padding: 1.1rem 1.2rem;
+    margin: 0.75rem 0 1.35rem;
+}}
+
+.term-bar {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: -1.4rem -1.6rem 1.35rem;
+    padding: 0.45rem 0.7rem 0.45rem 0.95rem;
+    background: {P["bg_dark"]};
+    border-bottom: 1px solid {P["border"]};
+    border-radius: 8px 8px 0 0;
+    color: {P["ink_light"]};
+    font-size: 0.72rem;
+}}
+
+.term-controls {{
+    display: flex;
+    gap: 0.65rem;
+    color: {P["ink_light"]};
+}}
+
+.term-prompt {{
+    color: {P["forest"]};
 }}
 </style>
 """
@@ -506,7 +574,7 @@ def chart_gauge(score: float) -> go.Figure:
         mode="gauge+number",
         value=score,
         title=dict(
-            text=f"<span style='font-family:Crimson Pro,serif;font-size:13px;color:{ink_light};font-style:italic'>{label}</span>",
+            text=f"<span style='font-family:Fira Code,JetBrains Mono,monospace;font-size:13px;color:{ink_light}'>{label}</span>",
             font=dict(size=13),
         ),
         number=dict(
@@ -518,20 +586,20 @@ def chart_gauge(score: float) -> go.Figure:
                 range=[0, 100],
                 tickwidth=1,
                 tickcolor=P["border"],
-                tickfont=dict(size=9, family="Inter, sans-serif", color=P["ink_light"]),
+                tickfont=dict(size=9, family="Fira Code, JetBrains Mono, monospace", color=P["ink_light"]),
                 tickvals=[0, 25, 50, 75, 100],
             ),
             bar=dict(color=color, thickness=0.22),
             bgcolor="rgba(0,0,0,0)",
             borderwidth=0,
             steps=[
-                {"range": [0, 25],   "color": "rgba(107,31,31,0.07)"},
-                {"range": [25, 50],  "color": "rgba(122,59,30,0.05)"},
-                {"range": [50, 75],  "color": "rgba(154,123,47,0.04)"},
-                {"range": [75, 100], "color": "rgba(27,67,50,0.05)"},
+                {"range": [0, 25],   "color": "rgba(224,108,117,0.15)"},
+                {"range": [25, 50],  "color": "rgba(240,152,158,0.12)"},
+                {"range": [50, 75],  "color": "rgba(240,173,78,0.12)"},
+                {"range": [75, 100], "color": "rgba(80,250,123,0.12)"},
             ],
             threshold=dict(
-                line=dict(color=P["ink_light"], width=1.5),
+                line=dict(color=P["navy_light"], width=1.5),
                 thickness=0.7,
                 value=68,
             ),
@@ -543,7 +611,7 @@ def chart_gauge(score: float) -> go.Figure:
         margin=dict(l=20, r=20, t=40, b=10),
         annotations=[dict(
             x=0.5, y=0.08, xanchor="center",
-            text=f"<span style='font-family:Inter,sans-serif;font-size:9px;color:{ink_light};letter-spacing:0.1em'>ESTIMATED 2019 BASELINE  ▲  68.0</span>",
+            text=f"<span style='font-family:Fira Code,JetBrains Mono,monospace;font-size:9px;color:{ink_light};letter-spacing:0.1em'>ESTIMATED 2019 BASELINE  ▲  68.0</span>",
             showarrow=False,
         )],
     )
@@ -554,10 +622,10 @@ def chart_platform_trends(trends_df: pd.DataFrame) -> go.Figure:
     platform_colors = {
         "reddit":      P["gold"],
         "hackernews":  P["rust"],
-        "bluesky":     "#0085FF",
-        "youtube":     "#CC0000",
-        "fourchan":    "#6B8E23",
-        "steam":       "#1B2838",
+        "bluesky":     P["navy_light"],
+        "youtube":     P["burgundy"],
+        "fourchan":    P["forest"],
+        "steam":       "#5fb6cc",
     }
 
     fig = go.Figure()
@@ -587,18 +655,18 @@ def chart_platform_trends(trends_df: pd.DataFrame) -> go.Figure:
             gridcolor=P["border_soft"],
             zeroline=False,
             tickformat="%b '%y",
-            tickfont=dict(size=10, family="Inter"),
+            tickfont=dict(size=10, family="Fira Code", color=P["ink_light"]),
         ),
         yaxis=dict(
             title=dict(
                 text="Aliveness Score",
-                font=dict(size=10, family="Inter", color=P["ink_light"]),
+                font=dict(size=10, family="Fira Code", color=P["ink_light"]),
             ),
             range=[0, 100],
             showgrid=True,
             gridcolor=P["border_soft"],
             zeroline=False,
-            tickfont=dict(size=10, family="Inter"),
+            tickfont=dict(size=10, family="Fira Code", color=P["ink_light"]),
         ),
         legend=dict(
             orientation="v",
@@ -606,8 +674,8 @@ def chart_platform_trends(trends_df: pd.DataFrame) -> go.Figure:
             y=0.99,
             xanchor="right",
             x=0.99,
-            font=dict(size=10, family="Inter"),
-            bgcolor="rgba(242,237,228,0.85)",
+            font=dict(size=10, family="Fira Code", color=P["ink_mid"]),
+            bgcolor="rgba(17,17,17,0.88)",
             bordercolor=P["border_soft"],
             borderwidth=1,
         ),
@@ -651,18 +719,18 @@ def render_overall_healthbar(score: float) -> str:
 
     synth = round(100 - score, 1)
     return f"""
-<div style="margin:1.5rem 0 1rem">
+<div class="terminal-panel">
   <div style="display:flex;align-items:baseline;gap:0.75rem;margin-bottom:0.5rem">
     <span style="font-family:JetBrains Mono,monospace;font-size:2.8rem;font-weight:600;color:{color};line-height:1">{score:.1f}</span>
-    <span style="font-family:Inter,sans-serif;font-size:0.72rem;letter-spacing:0.12em;text-transform:uppercase;color:{P['ink_light']}">{status}</span>
+    <span style="font-family:Fira Code,JetBrains Mono,monospace;font-size:0.72rem;letter-spacing:0.12em;text-transform:uppercase;color:{P['ink_light']}">{status}</span>
   </div>
   <div style="display:flex;gap:3px">{segments}</div>
-  <div style="display:flex;justify-content:space-between;margin-top:0.35rem;font-family:Inter,sans-serif;font-size:0.65rem;color:{P['ink_light']};letter-spacing:0.08em">
+  <div style="display:flex;justify-content:space-between;margin-top:0.35rem;font-family:Fira Code,JetBrains Mono,monospace;font-size:0.65rem;color:{P['ink_light']};letter-spacing:0.08em">
     <span>0 — Dead Internet</span>
     <span style="color:{P['ink_light']}">▲ 68.0 est. 2019 baseline</span>
     <span>100 — Fully Human</span>
   </div>
-  <div style="margin-top:0.4rem;font-family:Inter,sans-serif;font-size:0.7rem;color:{P['ink_light']}">{synth}% of sampled content estimated synthetic</div>
+  <div style="margin-top:0.4rem;font-family:Fira Code,JetBrains Mono,monospace;font-size:0.7rem;color:{P['ink_light']}">{synth}% of sampled content estimated synthetic</div>
 </div>
 """
 
@@ -673,8 +741,12 @@ def render_masthead(live: bool = True):
     dot_style = "live-dot" if live else ""
     st.markdown(f"""
     <div class="masthead">
+      <div class="term-bar">
+        <span>user@observatory: ~</span>
+        <span class="term-controls">− ×</span>
+      </div>
       <div class="masthead-eyebrow">Observational Research  ·  Internet Linguistics  ·  Open Data</div>
-      <div class="masthead-title">Dead Internet Observatory</div>
+      <div class="masthead-title"><span class="term-prompt">&gt;</span> Dead Internet Observatory</div>
       <div class="masthead-subtitle">Tracking the synthetic displacement of human-authored content on the public web</div>
       <div class="masthead-meta">
         <span><span class="{dot_style}"></span>{status}</span>
@@ -738,16 +810,16 @@ def render_source_rows(src_df: pd.DataFrame):
         "reddit":       P["gold"],
         "hackernews":   P["rust"],
         "common_crawl": P["burgundy"],
-        "bluesky":      "#0085FF",
-        "fourchan":     "#6B8E23",
-        "steam":        "#1B2838",
-        "youtube":      "#CC0000",
-        "linkedin":     "#0A66C2",
-        "twitter":      "#1DA1F2",
-        "stackoverflow": "#F48024",
-        "mastodon":      "#6364FF",
-        "substack":      "#FF6719",
-        "github":        "#6E40C9",
+        "bluesky":      P["navy_light"],
+        "fourchan":     P["forest"],
+        "steam":        "#5fb6cc",
+        "youtube":      P["burgundy"],
+        "linkedin":     P["navy"],
+        "twitter":      P["navy_light"],
+        "stackoverflow": P["rust"],
+        "mastodon":      P["purple"],
+        "substack":      P["gold_light"],
+        "github":        P["purple"],
     }
     rows_html = ""
     for src, score in agg.items():
@@ -765,8 +837,8 @@ def render_source_rows(src_df: pd.DataFrame):
 
 
 _HBAR_COLORS = [
-    "#7A0000", "#A83200", "#CC5500", "#D97D00", "#C4A200",
-    "#8DAA00", "#4A9A30", "#1E8855", "#008866", "#00A090",
+    "#5a252b", "#8f3f47", "#e06c75", "#f0989e", "#f0ad4e",
+    "#d4c56a", "#8fdc72", "#50fa7b", "#5fb6cc", "#9cdef2",
 ]
 
 
@@ -804,7 +876,7 @@ def render_health_bar(label: str, score: float) -> str:
     return (
         f'<div style="display:flex;align-items:center;gap:0.75rem;padding:0.4rem 0;'
         f'border-bottom:1px solid {P["border_soft"]}">'
-        f'<div style="width:130px;font-family:Inter,sans-serif;font-size:0.68rem;'
+        f'<div style="width:130px;font-family:Fira Code,JetBrains Mono,monospace;font-size:0.68rem;'
         f'font-weight:600;letter-spacing:0.12em;text-transform:uppercase;'
         f'color:{P["ink_light"]};flex-shrink:0">{label}</div>'
         f'<div style="display:flex;flex:1;gap:2px;height:16px">{segments}</div>'
@@ -823,7 +895,7 @@ def render_platform_health_bars(src_df: pd.DataFrame) -> str:
         for src, score in agg.items()
         if float(score) > 0
     )
-    return f'<div class="health-bar-section">{bars}</div>'
+    return f'<div class="terminal-panel health-bar-section">{bars}</div>'
 
 
 def report_load_failure(label: str, exc: Exception, *, critical: bool = False):
@@ -880,7 +952,7 @@ def main():
 
     # ── Lede ─────────────────────────────────────────────────────────────────
     st.markdown(f"""
-    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:1.05rem;
+    <p style="font-family:'Fira Code','JetBrains Mono',monospace;font-style:normal;font-size:1.05rem;
               color:{P['ink_mid']};max-width:640px;margin:0.25rem 0 1.5rem;line-height:1.65">
       A growing share of what you read online was not written by a person.
       This index deploys bots across the internet to continuously measure the shift.
@@ -902,7 +974,7 @@ def main():
     st.markdown('<hr class="section-rule"><div class="section-label">Platform Aliveness Health</div>',
                 unsafe_allow_html=True)
     st.markdown(f"""
-    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
+    <p style="font-family:'Fira Code','JetBrains Mono',monospace;font-style:normal;font-size:0.9rem;
               color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
       The decline is not uniform. Some platforms retain stronger human signal than others.
       The bars below show each source's current aliveness score relative to the 0–100 index.
@@ -919,7 +991,7 @@ def main():
                 unsafe_allow_html=True)
 
     st.markdown(f"""
-    <p style="font-family:'Crimson Pro',serif;font-style:italic;font-size:0.9rem;
+    <p style="font-family:'Fira Code','JetBrains Mono',monospace;font-style:normal;font-size:0.9rem;
               color:{P['ink_light']};margin:0.1rem 0 0.75rem;line-height:1.6">
       How the Internet Aliveness Index is computed.
     </p>
@@ -948,7 +1020,7 @@ def main():
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(f"""
     <div style="text-align:center;padding:3rem 0 1.5rem;border-top:1px solid {P['border_soft']};
-                margin-top:2rem;font-family:Inter,sans-serif;font-size:0.65rem;
+                margin-top:2rem;font-family:Fira Code,JetBrains Mono,monospace;font-size:0.65rem;
                 color:{P['ink_light']};letter-spacing:0.12em;text-transform:uppercase">
       Dead Internet Observatory &nbsp;·&nbsp; MIT License &nbsp;·&nbsp;
       All source data public domain &nbsp;·&nbsp; No cookies &nbsp;·&nbsp; No tracking
