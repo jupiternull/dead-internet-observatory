@@ -1,27 +1,8 @@
 name: "⚙️ Pipeline + Index Update"
 
 on:
-  workflow_run:
-    workflows:
-      - "🤖 Reddit Minion"
-      - "📰 News Crawler Minion"
-      - "📖 Wikipedia Minion"
-      - "🌐 Common Crawl Minion"
-      - "🔶 HackerNews Minion"
-      - "🕰️ Wayback Machine Minion"
-      - "🦋 Bluesky Minion"
-      - "🐸 4chan Minion"
-      - "🎮 Steam Minion"
-      - "📺 YouTube Minion"
-      - "💼 LinkedIn Minion"
-      - "🌐 Daily Full Sweep"
-      - "🔢 Stack Overflow Minion"
-      - "🐘 Mastodon Minion"
-      - "📰 Substack Minion"
-      - "🐙 GitHub Content Minion"
-    types: [completed]
   schedule:
-    - cron: "0 6 * * *"       # Daily at 06:00 UTC — catches all overnight minions
+    - cron: "30 2,6,10,14,18,22 * * *"
   workflow_dispatch:
 
 permissions:
@@ -30,11 +11,10 @@ permissions:
 
 concurrency:
   group: pipeline
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   process:
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -60,13 +40,12 @@ jobs:
           key: hf-distilgpt2-v1
           restore-keys: hf-distilgpt2-
 
-      # ── Download bronze artifacts from all minion runs today ────────────────
-      # Uses gh api directly to find and extract each artifact into the exact
-      # bronze subdirectory that bronze_ingestion.py expects.
+      # Download the latest retained artifact for each active source.
       - name: Download minion artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           declare -A DIR_MAP=(
             [reddit]=reddit [news]=news [wikipedia]=wikipedia
             [hn]=hackernews [wayback]=wayback [commoncrawl]=common_crawl
@@ -92,9 +71,7 @@ jobs:
             return 1
           }
 
-          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
-            | jq -r '[.artifacts[] | select(.expired == false) | select(.name | test("'"$PATTERN"'"))] | group_by(.name | split("-bronze-")[0]) | map(sort_by(.created_at) | last) | .[] | "\(.id) \(.name)"' \
-            | while read artifact_id artifact_name; do
+          while read -r artifact_id artifact_name; do
                 prefix="${artifact_name%%-bronze-*}"
                 if [ "$prefix" = "sweep" ]; then
                   echo "==> $artifact_name → data/bronze/ (sweep, all sources)"
@@ -104,7 +81,7 @@ jobs:
                   fi
                   continue
                 fi
-                target_dir="${DIR_MAP[$prefix]}"
+                target_dir="${DIR_MAP[$prefix]:-}"
                 if [ -z "$target_dir" ]; then
                   echo "Unknown prefix: $prefix, skipping"
                   continue
@@ -114,9 +91,19 @@ jobs:
                 if download_artifact "$artifact_id" "data/bronze/$target_dir/"; then
                   unzip -o -q /tmp/artifact.zip -d "data/bronze/$target_dir/"
                 fi
-              done
+              done < <(
+                gh api --paginate \
+                  "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+                  --jq '.artifacts[]' \
+                  | jq -sr '[.[] | select(.expired == false) | select(.name | test("'"$PATTERN"'"))] | group_by(.name | split("-bronze-")[0]) | map(sort_by(.created_at) | last) | .[] | "\(.id) \(.name)"'
+              )
           echo "==> Bronze download complete"
-          find data/bronze -name "*.jsonl" | wc -l | xargs -I{} echo "  {} JSONL files ready"
+          jsonl_count=$(find data/bronze -name "*.jsonl" -type f | wc -l)
+          if [ "$jsonl_count" -eq 0 ]; then
+            echo "ERROR: no bronze JSONL artifacts were downloaded"
+            exit 1
+          fi
+          echo "  $jsonl_count JSONL files ready"
 
       - name: Run Bronze → Silver pipeline
         run: python3 -m pipeline.bronze_ingestion

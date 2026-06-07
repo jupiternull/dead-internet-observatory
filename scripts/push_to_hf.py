@@ -44,87 +44,33 @@ def push(repo_id: str, data_root: Path, token: str):
 
     api = HfApi()
 
-    # Create dataset repo if it doesn't exist
-    try:
-        retry_hf(
-            "creating dataset repo",
-            lambda: api.create_repo(repo_id=repo_id, repo_type="dataset",
-                                    private=False, exist_ok=True, token=token),
-        )
-        print(f"[HF] Repo ready: https://huggingface.co/datasets/{repo_id}")
-    except Exception as exc:
-        if is_rate_limit(exc):
-            print(f"[HF] Rate limited creating repo; assuming it already exists and continuing: {exc}")
-        else:
-            print(f"[HF] Repo creation error (may already exist): {exc}")
-
-    # Upload Parquet layers in two commits instead of one API call per file.
-    uploaded = 0
-    failed = []
-    rate_limited = []
-    for layer in ["silver", "gold"]:
-        layer_dir = data_root / layer
-        if not layer_dir.exists():
-            print(f"[HF] Skipping {layer} — directory not found")
-            continue
-
-        parquet_files = sorted(layer_dir.rglob("*.parquet"))
-        if not parquet_files:
-            print(f"[HF] Skipping {layer} — no Parquet files found")
-            continue
-
-        print(f"[HF] Uploading {layer}/ layer ({len(parquet_files)} parquet files) …")
-        try:
-            retry_hf(
-                f"uploading {layer}/",
-                lambda: api.upload_folder(
-                    folder_path=str(layer_dir),
-                    path_in_repo=layer,
-                    repo_id=repo_id,
-                    repo_type="dataset",
-                    token=token,
-                    allow_patterns="*.parquet",
-                    commit_message=f"update {layer} parquet datasets",
-                ),
-            )
-            uploaded += len(parquet_files)
-        except Exception as exc:
-            print(f"[HF] Upload failed for {layer}/: {exc}")
-            if is_rate_limit(exc):
-                rate_limited.append(layer)
-            else:
-                failed.append(layer)
-
-    # Also upload the SQLite index as a convenience snapshot
+    parquet_files = sorted(data_root.glob("silver/**/*.parquet"))
+    parquet_files.extend(sorted(data_root.glob("gold/**/*.parquet")))
     db_path = data_root / "observatory.db"
-    if db_path.exists():
-        print("[HF] Uploading observatory.db snapshot …")
-        try:
-            retry_hf(
-                "uploading observatory.db",
-                lambda: api.upload_file(
-                    path_or_fileobj=str(db_path),
-                    path_in_repo="observatory.db",
-                    repo_id=repo_id,
-                    repo_type="dataset",
-                    token=token,
-                    commit_message="update observatory.db",
-                ),
-            )
-            uploaded += 1
-        except Exception as exc:
-            print(f"[HF] DB upload failed: {exc}")
-            if is_rate_limit(exc):
-                rate_limited.append("observatory.db")
-            else:
-                failed.append("observatory.db")
-
-    if failed:
-        print(f"[HF] Error: {len(failed)} required upload(s) failed: {', '.join(failed)}")
+    uploaded = len(parquet_files) + int(db_path.exists())
+    if not uploaded:
+        print("[HF] Error: no Parquet datasets or observatory.db found")
         sys.exit(1)
 
-    if rate_limited:
-        print(f"[HF] Deferred due to rate limit: {', '.join(rate_limited)}")
+    print(f"[HF] Uploading {uploaded} dataset files in one commit …")
+    try:
+        retry_hf(
+            "uploading dataset snapshot",
+            lambda: api.upload_folder(
+                folder_path=str(data_root),
+                path_in_repo="",
+                repo_id=repo_id,
+                repo_type="dataset",
+                token=token,
+                allow_patterns=["*.parquet", "observatory.db"],
+                commit_message="update observatory dataset snapshot",
+            ),
+        )
+    except Exception as exc:
+        if not is_rate_limit(exc):
+            print(f"[HF] Dataset upload failed: {exc}")
+            sys.exit(1)
+        print("[HF] Dataset sync deferred due to rate limiting.")
         print("[HF] Pipeline output is complete; Hugging Face sync can catch up on the next run.")
         return
 
