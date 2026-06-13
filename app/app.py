@@ -5,7 +5,8 @@ Research-grade interface tracking the Internet Aliveness Index.
 Aesthetic: dark terminal observatory — slate, cyan signal, coral warning.
 """
 
-import os
+import hashlib
+import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,60 +33,14 @@ except ImportError:
     ANALYTICS_OK = False
 
 
-_DEFAULT_SUPABASE_URL = "https://qwuabrmpudlqngfcxezh.supabase.co"
-_DEFAULT_SUPABASE_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3dWFicm1wdWRscW5nZmN4ZXpoIiwicm9sZSI6"
-    "ImFub24iLCJpYXQiOjE3Nzc5NDYxMDIsImV4cCI6MjA5MzUyMjEwMn0"
-    ".eTcAx9mcyAdOf4iBymIvpwK-E-Ayg-FKwphoDtzr6Ss"
-)
-_SUPABASE_URL = None
-_SUPABASE_KEY = None
-_SUPABASE_SESSION = None
-
 CACHE_TTL_SECONDS = 21600
+DATASET_REPO = "jupiternull/dead-internet-observatory"
+DATABASE_URL = (
+    f"https://huggingface.co/datasets/{DATASET_REPO}/resolve/main/observatory.db"
+)
 
 
-def _secret(name: str) -> Optional[str]:
-    try:
-        value = st.secrets.get(name)
-        if value:
-            return str(value)
-        supabase = st.secrets.get("supabase", {})
-        value = supabase.get(name) if hasattr(supabase, "get") else None
-        return str(value) if value else None
-    except Exception:
-        return None
-
-
-def _supabase_config() -> tuple[str, str]:
-    global _SUPABASE_URL, _SUPABASE_KEY
-    if _SUPABASE_URL and _SUPABASE_KEY:
-        return _SUPABASE_URL, _SUPABASE_KEY
-
-    _SUPABASE_URL = (
-        _secret("SUPABASE_URL")
-        or _secret("url")
-        or os.getenv("SUPABASE_URL")
-        or _DEFAULT_SUPABASE_URL
-    )
-    _SUPABASE_KEY = (
-        _secret("SUPABASE_ANON_KEY")
-        or _secret("SUPABASE_KEY")
-        or _secret("anon_key")
-        or _secret("key")
-        or os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("SUPABASE_KEY")
-        or _DEFAULT_SUPABASE_KEY
-    )
-    return _SUPABASE_URL, _SUPABASE_KEY
-
-
-def _supabase_session() -> requests.Session:
-    global _SUPABASE_SESSION
-    if _SUPABASE_SESSION:
-        return _SUPABASE_SESSION
-
+def _http_session() -> requests.Session:
     retry = Retry(
         total=3,
         connect=3,
@@ -100,20 +55,25 @@ def _supabase_session() -> requests.Session:
     session = requests.Session()
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-    _SUPABASE_SESSION = session
     return session
 
 
-def _sb_get(table: str, params: dict = None) -> list:
-    url, key = _supabase_config()
-    r = _supabase_session().get(
-        f"{url.rstrip('/')}/rest/v1/{table}",
-        headers={"apikey": key, "Authorization": f"Bearer {key}"},
-        params=params or {},
-        timeout=(5, 20),
-    )
-    r.raise_for_status()
-    return r.json()
+@st.cache_resource(ttl=CACHE_TTL_SECONDS)
+def _database_path() -> str:
+    response = _http_session().get(DATABASE_URL, timeout=(5, 60))
+    response.raise_for_status()
+    digest = hashlib.sha256(response.content).hexdigest()[:16]
+    path = Path("/tmp") / f"dead-internet-observatory-{digest}.db"
+    if not path.exists():
+        path.write_bytes(response.content)
+    return str(path)
+
+
+def _query(sql: str, params: tuple = ()) -> list:
+    path = _database_path()
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        return [dict(row) for row in conn.execute(sql, params).fetchall()]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -499,11 +459,14 @@ a, a:visited {{
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_timeline(days: int = 3650) -> pd.DataFrame:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
-    data = _sb_get("composite_index", {
-        "date": f"gte.{cutoff}",
-        "select": "date,aliveness_index,smoothed_index,n_docs,anomaly_flag,anomaly_reason",
-        "order": "date.asc",
-    })
+    data = _query(
+        """SELECT date, aliveness_index, smoothed_index, n_docs,
+                  anomaly_flag, anomaly_reason
+           FROM composite_index
+           WHERE date >= ?
+           ORDER BY date ASC""",
+        (cutoff,),
+    )
     df = pd.DataFrame(data)
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
@@ -517,14 +480,31 @@ def load_timeline(days: int = 3650) -> pd.DataFrame:
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_sources() -> pd.DataFrame:
-    return pd.DataFrame(_sb_get("latest_source_scores", {
-        "select": "source,mean_score,n_docs,date",
-    }))
+    return pd.DataFrame(_query(
+        """SELECT source, date,
+                  CASE WHEN SUM(n_docs) > 0
+                       THEN SUM(mean_score * n_docs) / SUM(n_docs)
+                       ELSE AVG(mean_score)
+                  END AS mean_score,
+                  SUM(n_docs) AS n_docs
+           FROM daily_index
+           WHERE mean_score IS NOT NULL
+             AND date = (
+                 SELECT MAX(latest.date)
+                 FROM daily_index latest
+                 WHERE latest.source = daily_index.source
+                   AND latest.mean_score IS NOT NULL
+             )
+           GROUP BY source, date
+           ORDER BY source"""
+    ))
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_score() -> float:
-    data = _sb_get("composite_index", {"select": "smoothed_index", "order": "date.desc", "limit": "1"})
+    data = _query(
+        "SELECT smoothed_index FROM composite_index ORDER BY date DESC LIMIT 1"
+    )
     if not data:
         raise RuntimeError("composite_index returned no current score")
     return float(data[0]["smoothed_index"])
@@ -532,7 +512,7 @@ def load_score() -> float:
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_total_docs() -> int:
-    data = _sb_get("meta", {"key": "eq.total_scored_count", "select": "value"})
+    data = _query("SELECT value FROM meta WHERE key = 'total_scored_count'")
     if not data:
         raise RuntimeError("meta.total_scored_count returned no value")
     return int(data[0]["value"])
@@ -541,12 +521,14 @@ def load_total_docs() -> int:
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
 def load_platform_trends() -> pd.DataFrame:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
-    data = _sb_get("daily_index", {
-        "source": "in.(reddit,hackernews,bluesky,youtube,fourchan,steam)",
-        "date": f"gte.{cutoff}",
-        "select": "date,source,aliveness_index",
-        "order": "date.asc",
-    })
+    data = _query(
+        """SELECT date, source, aliveness_index
+           FROM daily_index
+           WHERE source IN ('reddit', 'hackernews', 'bluesky', 'youtube', 'fourchan', 'steam')
+             AND date >= ?
+           ORDER BY date ASC""",
+        (cutoff,),
+    )
     df = pd.DataFrame(data)
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
@@ -900,7 +882,7 @@ def render_platform_health_bars(src_df: pd.DataFrame) -> str:
 
 def report_load_failure(label: str, exc: Exception, *, critical: bool = False):
     message = (
-        f"{label} could not be loaded from Supabase after bounded retries. "
+        f"{label} could not be loaded from the published dataset snapshot. "
         f"Live data for that section is unavailable. {type(exc).__name__}: {exc}"
     )
     if critical:

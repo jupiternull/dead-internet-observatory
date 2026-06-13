@@ -14,6 +14,15 @@ import sys
 import time
 from pathlib import Path
 
+import requests
+
+
+STATE_FILES = (
+    "gold/doc_registry.parquet",
+    "gold/scored.parquet",
+    "observatory.db",
+)
+
 
 def is_rate_limit(exc):
     text = str(exc).lower()
@@ -33,6 +42,25 @@ def retry_hf(label, func, max_attempts=3):
                 time.sleep(delay)
                 continue
             raise
+
+
+def restore(repo_id: str, data_root: Path):
+    base_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main"
+    restored = 0
+
+    for relative_path in STATE_FILES:
+        destination = data_root / relative_path
+        response = requests.get(f"{base_url}/{relative_path}", timeout=60)
+        if response.status_code == 404:
+            print(f"[HF] No prior {relative_path}")
+            continue
+        response.raise_for_status()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(response.content)
+        restored += 1
+        print(f"[HF] Restored {relative_path}")
+
+    print(f"[HF] Restored {restored}/{len(STATE_FILES)} state files")
 
 
 def push(repo_id: str, data_root: Path, token: str):
@@ -79,11 +107,17 @@ def push(repo_id: str, data_root: Path, token: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--restore", action="store_true",
+                        help="Restore persistent pipeline state from Hugging Face")
     parser.add_argument("--repo", default="jupiternull/dead-internet-observatory",
                         help="HuggingFace dataset repo ID (owner/name)")
     parser.add_argument("--data-root", default="./data",
                         help="Path to the local data/ directory")
     args = parser.parse_args()
+
+    if args.restore:
+        restore(args.repo, Path(args.data_root))
+        sys.exit(0)
 
     token = os.environ.get("HF_TOKEN", "")
     if not token:

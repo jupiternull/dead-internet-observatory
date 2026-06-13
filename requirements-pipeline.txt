@@ -1,4 +1,4 @@
-# Bronze -> Silver -> Gold pipeline and Supabase sync.
+# Bronze -> Silver -> Gold pipeline and Hugging Face publication.
 requests>=2.31.0
 pyyaml>=6.0.1
 tqdm>=4.66.0

@@ -198,6 +198,78 @@ class AlivenessIndexEngine:
         self._recompute_composite()
         print(f"[INDEX] Ingested {len(df):,} docs, updated composite index")
 
+    def ingest_scored_delta(self, df: pd.DataFrame):
+        if df.empty or "aliveness_score" not in df.columns:
+            print("[INDEX] Nothing to ingest — empty or missing aliveness_score")
+            return
+
+        df = df.copy()
+        if "created_dt" in df.columns:
+            df["date"] = pd.to_datetime(df["created_dt"], errors="coerce", utc=True).dt.date
+        else:
+            df["date"] = datetime.now(timezone.utc).date()
+        df["date"] = df["date"].fillna(datetime.now(timezone.utc).date())
+
+        with self._conn() as conn:
+            for (date, source, category), group in df.groupby(["date", "source", "category"]):
+                scores = group["aliveness_score"].dropna()
+                if scores.empty:
+                    continue
+                values = (
+                    str(date), source, category, len(group),
+                    round(float(scores.mean()), 3),
+                    round(float(scores.median()), 3),
+                    round(float(scores.std()), 3),
+                    round(float((scores < 50).mean() * 100), 2),
+                    0.0,
+                    round(float(scores.mean()), 3),
+                )
+                conn.execute(
+                    """INSERT INTO daily_index VALUES (?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(date, source, category) DO UPDATE SET
+                           mean_score = (
+                               daily_index.mean_score * daily_index.n_docs
+                               + excluded.mean_score * excluded.n_docs
+                           ) / (daily_index.n_docs + excluded.n_docs),
+                           median_score = excluded.median_score,
+                           std_score = excluded.std_score,
+                           pct_below_50 = (
+                               daily_index.pct_below_50 * daily_index.n_docs
+                               + excluded.pct_below_50 * excluded.n_docs
+                           ) / (daily_index.n_docs + excluded.n_docs),
+                           bot_fraction = (
+                               daily_index.bot_fraction * daily_index.n_docs
+                               + excluded.bot_fraction * excluded.n_docs
+                           ) / (daily_index.n_docs + excluded.n_docs),
+                           aliveness_index = (
+                               daily_index.aliveness_index * daily_index.n_docs
+                               + excluded.aliveness_index * excluded.n_docs
+                           ) / (daily_index.n_docs + excluded.n_docs),
+                           n_docs = daily_index.n_docs + excluded.n_docs""",
+                    values,
+                )
+
+            if "domain" in df.columns:
+                for (date, domain), group in df.groupby(["date", "domain"]):
+                    scores = group["aliveness_score"].dropna()
+                    if scores.empty:
+                        continue
+                    category = group["category"].iloc[0] if "category" in group.columns else ""
+                    conn.execute(
+                        """INSERT INTO domain_scores VALUES (?,?,?,?,?)
+                           ON CONFLICT(date, domain) DO UPDATE SET
+                               mean_score = (
+                                   domain_scores.mean_score * domain_scores.n_docs
+                                   + excluded.mean_score * excluded.n_docs
+                               ) / (domain_scores.n_docs + excluded.n_docs),
+                               n_docs = domain_scores.n_docs + excluded.n_docs,
+                               category = excluded.category""",
+                        (str(date), domain, category, round(float(scores.mean()), 3), len(group)),
+                    )
+
+        self._recompute_composite()
+        print(f"[INDEX] Merged {len(df):,} docs into the composite index")
+
     def _recompute_composite(self):
         """Recompute the composite daily index from daily_index table."""
         with self._conn() as conn:
