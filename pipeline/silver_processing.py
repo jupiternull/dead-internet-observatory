@@ -14,15 +14,8 @@ import yaml
 
 from detection.ai_content_detector import score_dataframe, corpus_summary
 from analytics.aliveness_index import AlivenessIndexEngine
-from pipeline.supabase_sync import get_scored_doc_ids
 
 MAX_NEW_DOCS = 6_000
-INDEX_TABLES = (
-    "daily_index",
-    "composite_index",
-    "domain_scores",
-    "meta",
-)
 
 
 class SilverToGoldPipeline:
@@ -36,46 +29,7 @@ class SilverToGoldPipeline:
         self.gold_root.mkdir(parents=True, exist_ok=True)
         self.engine = AlivenessIndexEngine(config_path)
 
-    def _bootstrap_index(self):
-        if not os.environ.get("DATABASE_URL"):
-            return
-
-        try:
-            import psycopg2
-        except ImportError:
-            print("[GOLD] psycopg2 unavailable; skipping Supabase index bootstrap")
-            return
-
-        with self.engine._conn() as local:
-            existing = local.execute("SELECT COUNT(*) FROM composite_index").fetchone()[0]
-        if existing > 1:
-            return
-
-        print("[GOLD] Bootstrapping aggregate history from Supabase")
-        remote = psycopg2.connect(os.environ["DATABASE_URL"], connect_timeout=15)
-        try:
-            with remote.cursor() as cur, self.engine._conn() as local:
-                for table in INDEX_TABLES:
-                    columns = [
-                        row[1]
-                        for row in local.execute(f"PRAGMA table_info({table})").fetchall()
-                    ]
-                    cur.execute(f"SELECT {','.join(columns)} FROM {table}")
-                    rows = cur.fetchall()
-                    if not rows:
-                        continue
-                    placeholders = ",".join("?" for _ in columns)
-                    local.execute(f"DELETE FROM {table}")
-                    local.executemany(
-                        f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
-                        rows,
-                    )
-                    print(f"[GOLD] Imported {len(rows):,} {table} rows")
-        finally:
-            remote.close()
-
     def run(self, source_file: str = "combined.parquet"):
-        self._bootstrap_index()
         silver_path = self.silver_root / source_file
         if not silver_path.exists():
             print(f"[GOLD] Silver file not found: {silver_path}")
@@ -97,11 +51,10 @@ class SilverToGoldPipeline:
             registry_ids = set(
                 pd.read_parquet(registry_path, columns=["doc_id"])["doc_id"].dropna()
             )
-        elif os.environ.get("DATABASE_URL"):
-            print("[GOLD] Bootstrapping durable registry from Supabase")
-            registry_ids = get_scored_doc_ids()
-            if not registry_ids:
-                raise RuntimeError("Supabase registry bootstrap returned no document IDs")
+        else:
+            raise RuntimeError(
+                "Missing gold/doc_registry.parquet; restore persistent state before scoring"
+            )
         registry_ids.update(local_existing_ids)
         if registry_ids:
             pd.DataFrame({"doc_id": sorted(registry_ids)}).to_parquet(

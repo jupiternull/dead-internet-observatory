@@ -33,11 +33,9 @@ except ImportError:
     ANALYTICS_OK = False
 
 
-CACHE_TTL_SECONDS = 21600
+CACHE_TTL_SECONDS = 300
 DATASET_REPO = "jupiternull/dead-internet-observatory"
-DATABASE_URL = (
-    f"https://huggingface.co/datasets/{DATASET_REPO}/resolve/main/observatory.db"
-)
+DATASET_API_URL = f"https://huggingface.co/api/datasets/{DATASET_REPO}"
 
 
 def _http_session() -> requests.Session:
@@ -58,19 +56,29 @@ def _http_session() -> requests.Session:
     return session
 
 
+def _dataset_revision() -> str:
+    response = _http_session().get(DATASET_API_URL, timeout=(5, 20))
+    response.raise_for_status()
+    return response.json()["sha"]
+
+
 @st.cache_resource(ttl=CACHE_TTL_SECONDS)
-def _database_path() -> str:
-    response = _http_session().get(DATABASE_URL, timeout=(5, 60))
+def _database_path(revision: str) -> str:
+    url = (
+        f"https://huggingface.co/datasets/{DATASET_REPO}"
+        f"/resolve/{revision}/observatory.db"
+    )
+    response = _http_session().get(url, timeout=(5, 60))
     response.raise_for_status()
     digest = hashlib.sha256(response.content).hexdigest()[:16]
-    path = Path("/tmp") / f"dead-internet-observatory-{digest}.db"
+    path = Path("/tmp") / f"dead-internet-observatory-{revision[:12]}-{digest}.db"
     if not path.exists():
         path.write_bytes(response.content)
     return str(path)
 
 
 def _query(sql: str, params: tuple = ()) -> list:
-    path = _database_path()
+    path = _database_path(_dataset_revision())
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
         return [dict(row) for row in conn.execute(sql, params).fetchall()]

@@ -120,7 +120,6 @@ jobs:
         run: python3 -m pipeline.silver_processing
         env:
           PYTHONPATH: ${{ github.workspace }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ENABLE_PERPLEXITY: "1"
 
       - name: Check Hugging Face token
