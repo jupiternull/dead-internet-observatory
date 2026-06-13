@@ -45,14 +45,24 @@ jobs:
 
       - name: Patch config for this run
         if: ${{ github.event.inputs.crawl_date != '' }}
+        env:
+          CRAWL_DATE: ${{ github.event.inputs.crawl_date }}
+          MAX_SEGMENTS: ${{ github.event.inputs.max_segments }}
         run: |
           python - <<'EOF'
-          import yaml, sys
+          import os
+          import re
+          import yaml
+
           with open("config/config.yaml") as f: cfg = yaml.safe_load(f)
-          date = "${{ github.event.inputs.crawl_date }}"
+          date = os.environ["CRAWL_DATE"]
+          if not re.fullmatch(r"\d{4}-\d{2}", date):
+              raise SystemExit("crawl_date must use YYYY-MM format")
           if date:
               cfg["sources"]["common_crawl"]["crawl_dates"] = [date]
-          max_seg = int("${{ github.event.inputs.max_segments }}" or 3)
+          max_seg = int(os.environ.get("MAX_SEGMENTS") or 3)
+          if not 1 <= max_seg <= 100:
+              raise SystemExit("max_segments must be between 1 and 100")
           cfg["sources"]["common_crawl"]["max_segments_per_date"] = max_seg
           with open("config/config.yaml", "w") as f: yaml.dump(cfg, f)
           EOF

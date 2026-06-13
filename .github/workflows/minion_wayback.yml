@@ -32,13 +32,19 @@ jobs:
 
       - name: Patch snapshot years if overridden
         if: ${{ github.event.inputs.years != '' }}
+        env:
+          SNAPSHOT_YEARS: ${{ github.event.inputs.years }}
         run: |
           python3 - <<'EOF'
+          import os
           import yaml
+
           with open("config/config.yaml") as f: cfg = yaml.safe_load(f)
-          years_str = "${{ github.event.inputs.years }}"
+          years_str = os.environ["SNAPSHOT_YEARS"]
           if years_str:
               years = [int(y.strip()) for y in years_str.split(",") if y.strip()]
+              if not years or any(year < 1996 or year > 2100 for year in years):
+                  raise SystemExit("years must be comma-separated values from 1996 to 2100")
               cfg["sources"]["wayback"]["snapshot_years"] = years
           with open("config/config.yaml", "w") as f: yaml.dump(cfg, f)
           EOF

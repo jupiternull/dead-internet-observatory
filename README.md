@@ -6,7 +6,8 @@ The [Dead Internet Theory](https://en.wikipedia.org/wiki/Dead_Internet_theory) h
 
 This project is a living observatory that computes an **Internet Aliveness Index (IAI)** — a 0–100 score measuring how much of the sampled public internet still looks authentically human. Bots pull from 14 data sources, run a battery of statistical detection signals on every document, and aggregate everything into a daily index served through a Streamlit dashboard.
 
-No LLMs, no paid APIs, no subscriptions. 100% open source and free to run.
+No paid model APIs or subscriptions. Detection runs locally with classical NLP
+signals plus optional DistilGPT-2 perplexity scoring.
 
 ---
 
@@ -22,7 +23,7 @@ No LLMs, no paid APIs, no subscriptions. 100% open source and free to run.
 
 ## How the Index Works
 
-The IAI is a weighted composite of seven linguistic and behavioural signals:
+The IAI uses seven classical linguistic and behavioural signals:
 
 | Signal | Weight | What it's catching |
 |---|---|---|
@@ -35,6 +36,10 @@ The IAI is a weighted composite of seven linguistic and behavioural signals:
 | **Zipf Law Alignment** | 10% | Natural language follows a power law; AI text deviates |
 
 All signals are statistical. No external model calls, no GPU required. Everything runs on standard CPU in Python.
+
+For non-Common-Crawl documents, the pipeline also runs DistilGPT-2 locally and
+assigns perplexity 15% of the score; the seven classical weights are scaled
+proportionally. Common Crawl disables perplexity to stay within workflow time limits.
 
 ---
 
@@ -52,7 +57,7 @@ All signals are statistical. No external model calls, no GPU required. Everythin
 +---------------------------------------------------------------------------+
 |                               PIPELINE                                    |
 |  Bronze (raw JSONL) -> Silver (normalised Parquet)                        |
-|                     -> Gold (scored Parquet, 3000 docs/run cap)           |
+|                     -> Gold (scored Parquet, 6000 docs/run cap)           |
 |                     -> SQLite index snapshot                              |
 +-------------+-----------------------------+-----------------------------+
               | Parquet + SQLite -> Hugging Face Datasets
@@ -68,9 +73,7 @@ GitHub Actions runs the full cycle autonomously. No server required.
 
 ```
 01:00 UTC daily   ->  Wayback Machine
-02:00 UTC daily   ->  Common Crawl (5 CC dates/run, backfill)
-10:00 UTC daily   ->  Common Crawl (repeat)
-18:00 UTC daily   ->  Common Crawl (repeat)
+Every 4 hours     ->  Common Crawl (up to 5 segments/date)
 03:00 UTC daily   ->  Reddit
 03:30 UTC daily   ->  News Crawler
 04:00 UTC daily   ->  Wikipedia + HackerNews
@@ -78,15 +81,14 @@ GitHub Actions runs the full cycle autonomously. No server required.
 6x daily          ->  Pipeline (bronze->silver->gold->Hugging Face)
 06:00 UTC daily   ->  Stack Overflow
 06:30 UTC daily   ->  Bluesky
-07:00 UTC daily   ->  4chan + Steam
-07:00 UTC daily   ->  Mastodon
-08:00 UTC daily   ->  YouTube
+07:00 UTC daily   ->  4chan
+07:00/13:00/21:00 ->  Mastodon
+07:30 UTC daily   ->  Steam
+08:00/14:00/20:00 ->  YouTube
 08:30 UTC daily   ->  LinkedIn
 10:00 UTC daily   ->  GitHub Content
 18:00 UTC daily   ->  Stack Overflow (repeat)
-18:00 UTC daily   ->  GitHub Content (repeat)
-20:00 UTC daily   ->  YouTube (repeat)
-21:00 UTC daily   ->  Mastodon (repeat)
+22:00 UTC daily   ->  GitHub Content (repeat)
 ```
 
 ---
@@ -113,10 +115,33 @@ GitHub Actions runs the full cycle autonomously. No server required.
 | `substack_bot` | Substack | — | ✗ Cloudflare-blocked on GH Actions IPs |
 
 **Where data lives:**
-- Raw JSONL (bronze) → GitHub Artifacts, 7-day retention
+- Raw JSONL (bronze) → GitHub Artifacts, normally 7-day retention; Common Crawl uses 1 day
 - Processed Parquet (silver/gold) → [HuggingFace Datasets](https://huggingface.co/datasets/jupiternull/dead-internet-observatory)
 - Daily index aggregates → Hugging Face `observatory.db`
 - Scored doc registry → Hugging Face `gold/doc_registry.parquet`
+
+---
+
+## Data Privacy and Security
+
+The collectors only access publicly available pages and public APIs. Published
+Silver and Gold Parquet files contain full collected text and may include stable
+public account identifiers, URLs, titles, domains, timestamps, and personal or
+sensitive information embedded in public content. Collection does not sanitize
+or redact these fields before publication.
+
+- Secrets are supplied through GitHub Actions secrets or environment variables.
+- Credentials are never required by the public Streamlit dashboard.
+- `.env`, key, certificate, and Streamlit secret files are excluded from git.
+- GitHub secret scanning, push protection, private vulnerability reporting, and
+  Dependabot vulnerability alerts are enabled for this repository.
+- Forks must use their own credentials and must not publish them in configuration files.
+
+To request removal of a dataset record, open a GitHub issue containing only its
+`doc_id`. Do not post sensitive text or personal details. Credential exposures
+and other security issues should use the repository's private vulnerability
+reporting form under the **Security** tab. Removal from prior Hugging Face
+commits may require a separate history rewrite.
 
 ---
 
@@ -153,7 +178,11 @@ python3 -m minions.wayback_bot        # slow — fetches 5 years of snapshots
 python3 -m minions.common_crawl_bot   # heavy — downloads WET files
 
 # Run the full pipeline after harvesting
+python3 -m pipeline.bronze_ingestion
 python3 -m pipeline.silver_processing
+
+# Publish to your Hugging Face dataset repository
+HF_TOKEN=... python3 scripts/push_to_hf.py --repo owner/dataset
 ```
 
 ---
@@ -165,11 +194,23 @@ python3 -m pipeline.silver_processing
 2. Go to [share.streamlit.io](https://share.streamlit.io) → New app → point to `app/app.py`
 3. Deploy — Streamlit reads the public Hugging Face dataset snapshot and needs no secrets
 
+By default, a fork displays the upstream `jupiternull/dead-internet-observatory`
+dataset. For an independent deployment, create a Hugging Face dataset repository
+and replace the dataset ID in `app/app.py`, `scripts/push_to_hf.py`, and
+`.github/workflows/pipeline_and_index.yml`.
+
 **Activating autonomous data collection (GitHub Actions):**
-1. Push to GitHub — cron schedules activate automatically
-2. Add `HF_TOKEN` for Hugging Face dataset sync
-3. Existing deployments may keep `DATABASE_URL` for one run to bootstrap the durable registry, then remove it
-4. *(Optional)* Add `YOUTUBE_API_KEY`, `STACKOVERFLOW_API_KEY`, `GITHUB_TOKEN` for those minions
+1. Enable Actions and scheduled workflows on the fork
+2. Pre-create the Hugging Face dataset repository
+3. Add a write-capable `HF_TOKEN` for dataset publication
+4. Add `YOUTUBE_API_KEY` to enable YouTube collection
+5. Optionally add `STACKOVERFLOW_API_KEY` for higher Stack Exchange quotas
+
+`GITHUB_TOKEN` is supplied automatically by GitHub Actions. Supabase and
+`DATABASE_URL` are no longer used.
+
+Never commit these values. Add them under repository **Settings → Secrets and
+variables → Actions**.
 
 ---
 
@@ -203,7 +244,7 @@ This is a living project. A few things that would move the needle:
 
 - **Better signal weights** — calibrate against labeled human/AI datasets (HC3, RAID, M4 on HF)
 - **New minions** — Internet Archive bulk data, academic paper feeds, forum scrapers
-- **KenLM perplexity scoring** — train a 3-gram model on pre-2022 Common Crawl; score new text against it
+- **Perplexity calibration** — benchmark DistilGPT-2 scoring against labeled corpora
 - **Anomaly alerts** — webhook or email when the IAI drops more than X points in a day
 
 Open an issue or send a PR.
@@ -212,4 +253,6 @@ Open an issue or send a PR.
 
 ## License
 
-MIT. Do whatever you want with it.
+Source code is MIT licensed. Redistributed web content remains subject to its
+original source terms and applicable law; the MIT license does not grant rights
+to third-party dataset content.
