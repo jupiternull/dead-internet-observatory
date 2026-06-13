@@ -40,6 +40,12 @@ jobs:
           key: hf-distilgpt2-v1
           restore-keys: hf-distilgpt2-
 
+      - name: Restore persistent pipeline state
+        run: |
+          python3 scripts/push_to_hf.py \
+            --restore \
+            --repo jupiternull/dead-internet-observatory
+
       # Download the latest retained artifact for each active source.
       - name: Download minion artifacts
         env:

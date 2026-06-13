@@ -53,13 +53,13 @@ All signals are statistical. No external model calls, no GPU required. Everythin
 |                               PIPELINE                                    |
 |  Bronze (raw JSONL) -> Silver (normalised Parquet)                        |
 |                     -> Gold (scored Parquet, 3000 docs/run cap)           |
-|                     -> Supabase sync (daily index aggregates)             |
+|                     -> SQLite index snapshot                              |
 +-------------+-----------------------------+-----------------------------+
-              | Parquet -> HF Datasets      | Supabase (source of truth)
+              | Parquet + SQLite -> Hugging Face Datasets
               v                             v
 +--------------------+         +-------------------------------------+
 |  HuggingFace       |         |  Streamlit Community Cloud          |
-|  Datasets          |         |  (reads Supabase REST API)          |
+|  Datasets          |         |  (reads published SQLite snapshot)  |
 |  (public, free)    |         |                                     |
 +--------------------+         +-------------------------------------+
 ```
@@ -75,7 +75,7 @@ GitHub Actions runs the full cycle autonomously. No server required.
 03:30 UTC daily   ->  News Crawler
 04:00 UTC daily   ->  Wikipedia + HackerNews
 05:00 UTC daily   ->  Daily Full Sweep (fast minions)
-06:00 UTC daily   ->  Pipeline (bronze->silver->gold->Supabase)
+6x daily          ->  Pipeline (bronze->silver->gold->Hugging Face)
 06:00 UTC daily   ->  Stack Overflow
 06:30 UTC daily   ->  Bluesky
 07:00 UTC daily   ->  4chan + Steam
@@ -115,8 +115,8 @@ GitHub Actions runs the full cycle autonomously. No server required.
 **Where data lives:**
 - Raw JSONL (bronze) → GitHub Artifacts, 7-day retention
 - Processed Parquet (silver/gold) → [HuggingFace Datasets](https://huggingface.co/datasets/jupiternull/dead-internet-observatory)
-- Daily index aggregates → Supabase (`composite_index`, `daily_index`, `meta`)
-- Scored doc registry → Supabase `doc_registry` (dedup, all-time count)
+- Daily index aggregates → Hugging Face `observatory.db`
+- Scored doc registry → Hugging Face `gold/doc_registry.parquet`
 
 ---
 
@@ -129,7 +129,7 @@ pip install -r requirements-streamlit.txt
 streamlit run app/app.py
 ```
 
-The dashboard reads from Supabase by default. To run data collection locally, see below.
+The dashboard reads the published SQLite snapshot from Hugging Face. To run data collection locally, see below.
 
 ---
 
@@ -163,14 +163,12 @@ python3 -m pipeline.silver_processing
 **Streamlit Community Cloud (free):**
 1. Fork this repo
 2. Go to [share.streamlit.io](https://share.streamlit.io) → New app → point to `app/app.py`
-3. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` in Streamlit secrets or as environment variables
-4. Use your own Supabase project and anon key for forks; do not depend on the public observatory project
-5. Deploy — Streamlit auto-deploys on every push
+3. Deploy — Streamlit reads the public Hugging Face dataset snapshot and needs no secrets
 
 **Activating autonomous data collection (GitHub Actions):**
 1. Push to GitHub — cron schedules activate automatically
-2. Add `DATABASE_URL` secret in repo Settings → Secrets (Supabase connection string)
-3. *(Optional)* Add `HF_TOKEN` for HuggingFace dataset sync
+2. Add `HF_TOKEN` for Hugging Face dataset sync
+3. Existing deployments may keep `DATABASE_URL` for one run to bootstrap the durable registry, then remove it
 4. *(Optional)* Add `YOUTUBE_API_KEY`, `STACKOVERFLOW_API_KEY`, `GITHUB_TOKEN` for those minions
 
 ---
@@ -178,7 +176,7 @@ python3 -m pipeline.silver_processing
 Dependency files are split by runtime:
 - `requirements-streamlit.txt` — dashboard deployment
 - `requirements-minions.txt` — source collectors
-- `requirements-pipeline.txt` — processing, scoring, and Supabase sync
+- `requirements-pipeline.txt` — processing, scoring, and Hugging Face publication
 - `requirements.txt` — full superset kept for existing deployment compatibility
 
 ---
@@ -188,11 +186,11 @@ Dependency files are split by runtime:
 ```
 dead-internet-observatory/
 ├── minions/           # 14 data collection bots
-├── pipeline/          # Bronze → Silver → Gold ETL + Supabase sync
+├── pipeline/          # Bronze → Silver → Gold ETL + SQLite index
 ├── detection/         # Statistical AI-content detection engine
 ├── analytics/         # Aliveness Index computation + anomaly detection
 ├── app/               # Streamlit dashboard
-├── scripts/           # HuggingFace push, Supabase migration helpers
+├── scripts/           # Hugging Face publication and migration helpers
 ├── config/            # config.yaml — all tuneable parameters
 └── .github/workflows/ # Autonomous GitHub Actions workflows
 ```

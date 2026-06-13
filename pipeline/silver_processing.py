@@ -2,8 +2,8 @@
 Silver → Gold processing pipeline.
 
 Incremental: only scores documents not already present in the gold layer.
-New docs are appended to scored.parquet; the SQLite index and Supabase are
-updated with each run's delta.
+New docs are appended to scored.parquet; the durable registry and SQLite index
+are updated with each run.
 """
 
 import os
@@ -14,9 +14,15 @@ import yaml
 
 from detection.ai_content_detector import score_dataframe, corpus_summary
 from analytics.aliveness_index import AlivenessIndexEngine
-from pipeline.supabase_sync import sync_all, get_existing_doc_ids
+from pipeline.supabase_sync import get_scored_doc_ids
 
 MAX_NEW_DOCS = 6_000
+INDEX_TABLES = (
+    "daily_index",
+    "composite_index",
+    "domain_scores",
+    "meta",
+)
 
 
 class SilverToGoldPipeline:
@@ -30,7 +36,46 @@ class SilverToGoldPipeline:
         self.gold_root.mkdir(parents=True, exist_ok=True)
         self.engine = AlivenessIndexEngine(config_path)
 
+    def _bootstrap_index(self):
+        if not os.environ.get("DATABASE_URL"):
+            return
+
+        try:
+            import psycopg2
+        except ImportError:
+            print("[GOLD] psycopg2 unavailable; skipping Supabase index bootstrap")
+            return
+
+        with self.engine._conn() as local:
+            existing = local.execute("SELECT COUNT(*) FROM composite_index").fetchone()[0]
+        if existing > 1:
+            return
+
+        print("[GOLD] Bootstrapping aggregate history from Supabase")
+        remote = psycopg2.connect(os.environ["DATABASE_URL"], connect_timeout=15)
+        try:
+            with remote.cursor() as cur, self.engine._conn() as local:
+                for table in INDEX_TABLES:
+                    columns = [
+                        row[1]
+                        for row in local.execute(f"PRAGMA table_info({table})").fetchall()
+                    ]
+                    cur.execute(f"SELECT {','.join(columns)} FROM {table}")
+                    rows = cur.fetchall()
+                    if not rows:
+                        continue
+                    placeholders = ",".join("?" for _ in columns)
+                    local.execute(f"DELETE FROM {table}")
+                    local.executemany(
+                        f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
+                        rows,
+                    )
+                    print(f"[GOLD] Imported {len(rows):,} {table} rows")
+        finally:
+            remote.close()
+
     def run(self, source_file: str = "combined.parquet"):
+        self._bootstrap_index()
         silver_path = self.silver_root / source_file
         if not silver_path.exists():
             print(f"[GOLD] Silver file not found: {silver_path}")
@@ -42,18 +87,41 @@ class SilverToGoldPipeline:
 
         # ── Load already-scored doc_ids ───────────────────────────────────────
         gold_path = self.gold_root / "scored.parquet"
+        registry_path = self.gold_root / "doc_registry.parquet"
         local_existing_ids = set()
         if gold_path.exists():
             local_existing_ids = set(pd.read_parquet(gold_path, columns=["doc_id"])["doc_id"].dropna())
 
+        registry_ids = set()
+        if registry_path.exists():
+            registry_ids = set(
+                pd.read_parquet(registry_path, columns=["doc_id"])["doc_id"].dropna()
+            )
+        elif os.environ.get("DATABASE_URL"):
+            print("[GOLD] Bootstrapping durable registry from Supabase")
+            registry_ids = get_scored_doc_ids()
+            if not registry_ids:
+                raise RuntimeError("Supabase registry bootstrap returned no document IDs")
+        registry_ids.update(local_existing_ids)
+        if registry_ids:
+            pd.DataFrame({"doc_id": sorted(registry_ids)}).to_parquet(
+                registry_path, index=False, engine="pyarrow"
+            )
+            with self.engine._conn() as conn:
+                conn.execute(
+                    """INSERT INTO meta (key, value) VALUES ('total_scored_count', ?)
+                       ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+                    (str(len(registry_ids)),),
+                )
+            print(f"[GOLD] Persisted {len(registry_ids):,} registry IDs")
+
         candidate_ids = silver_df["doc_id"].dropna().unique().tolist()
-        supabase_existing_ids = get_existing_doc_ids(candidate_ids)
-        existing_ids = local_existing_ids | supabase_existing_ids
+        existing_ids = local_existing_ids | registry_ids
 
         if existing_ids:
             print(
                 f"[GOLD] {len(existing_ids):,} docs already scored "
-                f"({len(local_existing_ids):,} local, {len(supabase_existing_ids):,} Supabase matches)"
+                f"({len(local_existing_ids):,} scored, {len(registry_ids):,} registry)"
             )
         else:
             print("[GOLD] No prior scored docs found — scoring full silver batch")
@@ -117,12 +185,20 @@ class SilverToGoldPipeline:
         combined.to_parquet(gold_path, index=False, engine="pyarrow")
         print(f"[GOLD] ✓ scored.parquet now has {len(combined):,} docs")
 
-        # ── Update SQLite index ───────────────────────────────────────────────
-        self.engine.ingest_scored_df(combined, replace_affected_dates=True)
-        print("[GOLD] ✓ SQLite index updated")
+        registry_ids.update(scored["doc_id"].dropna().unique())
+        pd.DataFrame({"doc_id": sorted(registry_ids)}).to_parquet(
+            registry_path, index=False, engine="pyarrow"
+        )
+        print(f"[GOLD] ✓ doc_registry.parquet now has {len(registry_ids):,} docs")
 
-        # ── Sync delta to Supabase ────────────────────────────────────────────
-        sync_all(scored, self.engine)
+        self.engine.ingest_scored_delta(scored)
+        with self.engine._conn() as conn:
+            conn.execute(
+                """INSERT INTO meta (key, value) VALUES ('total_scored_count', ?)
+                   ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+                (str(len(registry_ids)),),
+            )
+        print("[GOLD] ✓ SQLite index updated")
 
 
 if __name__ == "__main__":
