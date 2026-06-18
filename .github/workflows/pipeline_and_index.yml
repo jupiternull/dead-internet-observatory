@@ -41,6 +41,8 @@ jobs:
           restore-keys: hf-distilgpt2-
 
       - name: Restore persistent pipeline state
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python3 scripts/push_to_hf.py \
             --restore \
