@@ -22,6 +22,7 @@ STATE_FILES = (
     "gold/scored.parquet",
     "observatory.db",
 )
+RESTORE_RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
 def is_rate_limit(exc):
@@ -46,19 +47,45 @@ def retry_hf(label, func, max_attempts=3):
 
 def restore(repo_id: str, data_root: Path):
     base_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main"
+    token = os.environ.get("HF_TOKEN", "")
+    headers = {"Authorization": f"Bearer {token}"} if token else None
     restored = 0
 
     for relative_path in STATE_FILES:
         destination = data_root / relative_path
-        response = requests.get(f"{base_url}/{relative_path}", timeout=60)
-        if response.status_code == 404:
-            print(f"[HF] No prior {relative_path}")
+        url = f"{base_url}/{relative_path}"
+        response = None
+
+        for attempt in range(1, 4):
+            try:
+                response = requests.get(url, headers=headers, timeout=120)
+                if response.status_code == 404:
+                    print(f"[HF] No prior {relative_path}")
+                    break
+                if response.status_code in RESTORE_RETRY_STATUSES and attempt < 3:
+                    delay = 30 * attempt
+                    print(
+                        f"[HF] Restore {relative_path} returned HTTP "
+                        f"{response.status_code}; retrying in {delay}s"
+                    )
+                    time.sleep(delay)
+                    continue
+                response.raise_for_status()
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(response.content)
+                restored += 1
+                print(f"[HF] Restored {relative_path}")
+                break
+            except requests.RequestException as exc:
+                if attempt == 3:
+                    print(f"[HF] Restore failed for {relative_path}: {exc}")
+                    raise
+                delay = 30 * attempt
+                print(f"[HF] Restore {relative_path} failed: {exc}; retrying in {delay}s")
+                time.sleep(delay)
+
+        if response is None or response.status_code == 404:
             continue
-        response.raise_for_status()
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(response.content)
-        restored += 1
-        print(f"[HF] Restored {relative_path}")
 
     print(f"[HF] Restored {restored}/{len(STATE_FILES)} state files")
 
