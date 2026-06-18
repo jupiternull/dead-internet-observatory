@@ -14,6 +14,7 @@ or via HTTPS. We use HTTPS for simplicity.
 import gzip
 import io
 import random
+import re
 from datetime import datetime, timezone
 from typing import Dict, Iterator, List, Optional
 from urllib.parse import urlparse
@@ -176,6 +177,8 @@ class CommonCrawlMinion(BaseMinion):
             resp.raise_for_status()
             for entry in resp.json():
                 cid = entry["id"].replace("CC-MAIN-", "")
+                if not re.fullmatch(r"\d{4}-\d{2}", cid):
+                    continue
                 if cid not in known:
                     known.append(cid)
         except Exception as exc:
@@ -260,6 +263,8 @@ class CommonCrawlMinion(BaseMinion):
                 self.logger.info(f"✓ {crawl_id} complete ({len(done)}/{len(all_ids)})")
 
         self.report_stats()
+        if not dry_run and self.stats["fetched"] == 0:
+            raise RuntimeError("Common Crawl harvest produced zero records")
 
 
 if __name__ == "__main__":
