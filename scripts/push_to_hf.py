@@ -30,6 +30,13 @@ def is_rate_limit(exc):
     return "429" in text or "too many requests" in text
 
 
+def is_transient_hf_error(exc):
+    response = getattr(exc, "response", None)
+    if response is not None and response.status_code in RESTORE_RETRY_STATUSES:
+        return True
+    return is_rate_limit(exc)
+
+
 def retry_hf(label, func, max_attempts=3):
     for attempt in range(1, max_attempts + 1):
         try:
@@ -78,6 +85,18 @@ def restore(repo_id: str, data_root: Path):
                 break
             except requests.RequestException as exc:
                 if attempt == 3:
+                    if is_transient_hf_error(exc):
+                        if destination.exists():
+                            print(
+                                f"[HF] Restore deferred for {relative_path}: {exc}; "
+                                "using cached local state"
+                            )
+                        else:
+                            print(
+                                f"[HF] Restore deferred for {relative_path}: {exc}; "
+                                "state file unavailable"
+                            )
+                        break
                     print(f"[HF] Restore failed for {relative_path}: {exc}")
                     raise
                 delay = 30 * attempt
