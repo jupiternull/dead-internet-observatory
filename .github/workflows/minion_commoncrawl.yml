@@ -78,6 +78,7 @@ jobs:
           name: commoncrawl-bronze-${{ github.run_id }}
           path: data/bronze/common_crawl/
           retention-days: 1
+          if-no-files-found: error
 
       - name: Commit data
         run: |
