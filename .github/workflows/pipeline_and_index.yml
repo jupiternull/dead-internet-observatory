@@ -40,6 +40,15 @@ jobs:
           key: hf-distilgpt2-v1
           restore-keys: hf-distilgpt2-
 
+      - name: Restore cached pipeline state
+        uses: actions/cache@v5
+        with:
+          path: |
+            data/gold
+            data/observatory.db
+          key: pipeline-state-${{ github.run_id }}
+          restore-keys: pipeline-state-
+
       - name: Restore persistent pipeline state
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -48,8 +57,19 @@ jobs:
             --restore \
             --repo jupiternull/dead-internet-observatory
 
+      - name: Verify pipeline state
+        id: pipeline_state
+        run: |
+          if [ -f data/gold/doc_registry.parquet ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Pipeline state unavailable; skipping this scheduled update."
+          fi
+
       # Download the latest retained artifact for each active source.
       - name: Download minion artifacts
+        if: ${{ steps.pipeline_state.outputs.ready == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -114,17 +134,20 @@ jobs:
           echo "  $jsonl_count JSONL files ready"
 
       - name: Run Bronze → Silver pipeline
+        if: ${{ steps.pipeline_state.outputs.ready == 'true' }}
         run: python3 -m pipeline.bronze_ingestion
         env:
           PYTHONPATH: ${{ github.workspace }}
 
       - name: Run Silver → Gold + Index update
+        if: ${{ steps.pipeline_state.outputs.ready == 'true' }}
         run: python3 -m pipeline.silver_processing
         env:
           PYTHONPATH: ${{ github.workspace }}
           ENABLE_PERPLEXITY: "1"
 
       - name: Check Hugging Face token
+        if: ${{ steps.pipeline_state.outputs.ready == 'true' }}
         id: hf_token
         run: |
           if [ -n "$HF_TOKEN" ]; then
@@ -137,7 +160,7 @@ jobs:
 
       # ── Push Parquet datasets to Hugging Face ───────────────────────────────
       - name: Push datasets to Hugging Face
-        if: ${{ steps.hf_token.outputs.present == 'true' }}
+        if: ${{ steps.pipeline_state.outputs.ready == 'true' && steps.hf_token.outputs.present == 'true' }}
         run: |
           python3 scripts/push_to_hf.py --repo jupiternull/dead-internet-observatory
         env:
