@@ -66,6 +66,7 @@ jobs:
               raise SystemExit(f"crawl_date {date} is not available in Common Crawl")
           if date:
               cfg["sources"]["common_crawl"]["crawl_dates"] = [date]
+              cfg["sources"]["common_crawl"]["max_dates_per_run"] = 1
           max_seg = int(os.environ.get("MAX_SEGMENTS") or 3)
           if not 1 <= max_seg <= 100:
               raise SystemExit("max_segments must be between 1 and 100")
