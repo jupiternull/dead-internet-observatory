@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       crawl_date:
-        description: "CC crawl date (e.g. 2025-06)"
+        description: "CC crawl date (e.g. 2025-05)"
         required: false
         default: ""
       max_segments:
@@ -52,12 +52,18 @@ jobs:
           python - <<'EOF'
           import os
           import re
+          import requests
           import yaml
 
           with open("config/config.yaml") as f: cfg = yaml.safe_load(f)
           date = os.environ["CRAWL_DATE"]
           if not re.fullmatch(r"\d{4}-\d{2}", date):
-              raise SystemExit("crawl_date must use YYYY-MM format")
+              raise SystemExit("crawl_date must use YYYY-WW format")
+          coll = requests.get("https://index.commoncrawl.org/collinfo.json", timeout=30)
+          coll.raise_for_status()
+          available = {entry["id"].replace("CC-MAIN-", "") for entry in coll.json()}
+          if date not in available:
+              raise SystemExit(f"crawl_date {date} is not available in Common Crawl")
           if date:
               cfg["sources"]["common_crawl"]["crawl_dates"] = [date]
           max_seg = int(os.environ.get("MAX_SEGMENTS") or 3)

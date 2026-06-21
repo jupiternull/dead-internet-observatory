@@ -169,20 +169,29 @@ class CommonCrawlMinion(BaseMinion):
 
     def _all_known_crawl_ids(self) -> List[str]:
         """Configured historical dates + any newer CC releases not yet in config."""
-        known = list(self.crawl_dates)
+        known = []
+        configured = list(self.crawl_dates)
         try:
             resp = requests.get(
                 "https://index.commoncrawl.org/collinfo.json", timeout=30
             )
             resp.raise_for_status()
+            available = set()
             for entry in resp.json():
                 cid = entry["id"].replace("CC-MAIN-", "")
                 if not re.fullmatch(r"\d{4}-\d{2}", cid):
                     continue
+                available.add(cid)
+            invalid = [cid for cid in configured if cid not in available]
+            if invalid:
+                self.logger.warning(f"Skipping unavailable Common Crawl IDs: {invalid}")
+            known = [cid for cid in configured if cid in available]
+            for cid in sorted(available, reverse=True):
                 if cid not in known:
                     known.append(cid)
         except Exception as exc:
             self.logger.warning(f"Could not fetch collinfo: {exc}")
+            known = configured
         return known
 
     def _load_progress(self) -> set:
