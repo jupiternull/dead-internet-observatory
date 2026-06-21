@@ -51,6 +51,9 @@ class CommonCrawlMinion(BaseMinion):
         self.logger.info(f"Fetching WET index for CC-MAIN-{crawl_id} …")
         try:
             resp = requests.get(url, timeout=90, stream=True)
+            if resp.status_code == 404:
+                self.logger.warning(f"  WET index unavailable for CC-MAIN-{crawl_id}")
+                return []
             resp.raise_for_status()
             content = gzip.decompress(resp.content).decode("utf-8")
             paths = [ln.strip() for ln in content.splitlines() if ln.strip()]
@@ -239,6 +242,14 @@ class CommonCrawlMinion(BaseMinion):
 
             all_paths = self.get_wet_paths(crawl_id)
             if not all_paths:
+                if not dry_run:
+                    done.add(crawl_id)
+                    self._save_progress(done)
+                    self.stats["skipped"] += 1
+                    self.logger.warning(
+                        f"Skipping CC-MAIN-{crawl_id}; no WET paths available "
+                        f"({len(done)}/{len(all_ids)})"
+                    )
                 continue
 
             sampled = random.sample(all_paths, min(self.max_segments, len(all_paths)))
@@ -272,7 +283,7 @@ class CommonCrawlMinion(BaseMinion):
                 self.logger.info(f"✓ {crawl_id} complete ({len(done)}/{len(all_ids)})")
 
         self.report_stats()
-        if not dry_run and self.stats["fetched"] == 0:
+        if not dry_run and self.stats["fetched"] == 0 and self.stats["skipped"] == 0:
             raise RuntimeError("Common Crawl harvest produced zero records")
 
 
