@@ -5,7 +5,6 @@ Research-grade interface tracking the Internet Aliveness Index.
 Aesthetic: dark terminal observatory — slate, cyan signal, coral warning.
 """
 
-import hashlib
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -17,6 +16,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+from huggingface_hub import hf_hub_download
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -64,17 +64,12 @@ def _dataset_revision() -> str:
 
 @st.cache_resource(ttl=CACHE_TTL_SECONDS)
 def _database_path(revision: str) -> str:
-    url = (
-        f"https://huggingface.co/datasets/{DATASET_REPO}"
-        f"/resolve/{revision}/observatory.db"
+    return hf_hub_download(
+        repo_id=DATASET_REPO,
+        repo_type="dataset",
+        filename="observatory.db",
+        revision=revision,
     )
-    response = _http_session().get(url, timeout=(5, 60))
-    response.raise_for_status()
-    digest = hashlib.sha256(response.content).hexdigest()[:16]
-    path = Path("/tmp") / f"dead-internet-observatory-{revision[:12]}-{digest}.db"
-    if not path.exists():
-        path.write_bytes(response.content)
-    return str(path)
 
 
 def _query(sql: str, params: tuple = ()) -> list:
