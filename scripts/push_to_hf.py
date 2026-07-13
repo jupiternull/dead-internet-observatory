@@ -10,11 +10,13 @@ Usage:
 
 import argparse
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
 
-import requests
+from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import RemoteEntryNotFoundError
 
 
 STATE_FILES = (
@@ -53,37 +55,29 @@ def retry_hf(label, func, max_attempts=3):
 
 
 def restore(repo_id: str, data_root: Path):
-    base_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main"
     token = os.environ.get("HF_TOKEN", "")
-    headers = {"Authorization": f"Bearer {token}"} if token else None
     restored = 0
 
     for relative_path in STATE_FILES:
         destination = data_root / relative_path
-        url = f"{base_url}/{relative_path}"
-        response = None
 
         for attempt in range(1, 4):
             try:
-                response = requests.get(url, headers=headers, timeout=120)
-                if response.status_code == 404:
-                    print(f"[HF] No prior {relative_path}")
-                    break
-                if response.status_code in RESTORE_RETRY_STATUSES and attempt < 3:
-                    delay = 30 * attempt
-                    print(
-                        f"[HF] Restore {relative_path} returned HTTP "
-                        f"{response.status_code}; retrying in {delay}s"
-                    )
-                    time.sleep(delay)
-                    continue
-                response.raise_for_status()
+                cached_path = hf_hub_download(
+                    repo_id=repo_id,
+                    filename=relative_path,
+                    repo_type="dataset",
+                    token=token or None,
+                )
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(response.content)
+                shutil.copyfile(cached_path, destination)
                 restored += 1
                 print(f"[HF] Restored {relative_path}")
                 break
-            except requests.RequestException as exc:
+            except RemoteEntryNotFoundError:
+                print(f"[HF] No prior {relative_path}")
+                break
+            except Exception as exc:
                 if attempt == 3:
                     if is_transient_hf_error(exc):
                         if destination.exists():
@@ -102,9 +96,6 @@ def restore(repo_id: str, data_root: Path):
                 delay = 30 * attempt
                 print(f"[HF] Restore {relative_path} failed: {exc}; retrying in {delay}s")
                 time.sleep(delay)
-
-        if response is None or response.status_code == 404:
-            continue
 
     print(f"[HF] Restored {restored}/{len(STATE_FILES)} state files")
 
