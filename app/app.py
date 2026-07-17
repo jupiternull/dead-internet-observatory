@@ -7,6 +7,7 @@ Aesthetic: dark terminal observatory — slate, cyan signal, coral warning.
 
 import sqlite3
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -36,6 +37,17 @@ except ImportError:
 CACHE_TTL_SECONDS = 300
 DATASET_REPO = "jupiternull/dead-internet-observatory"
 DATASET_API_URL = f"https://huggingface.co/api/datasets/{DATASET_REPO}"
+_last_valid_database_path: Optional[str] = None
+_database_path_lock = threading.Lock()
+
+REQUIRED_DATABASE_SCHEMA = {
+    "composite_index": {
+        "date", "aliveness_index", "smoothed_index", "n_docs",
+        "anomaly_flag", "anomaly_reason",
+    },
+    "daily_index": {"date", "source", "mean_score", "aliveness_index", "n_docs"},
+    "meta": {"key", "value"},
+}
 
 
 def _http_session() -> requests.Session:
@@ -64,16 +76,47 @@ def _dataset_revision() -> str:
 
 @st.cache_resource(ttl=CACHE_TTL_SECONDS)
 def _database_path(revision: str) -> str:
-    return hf_hub_download(
+    path = hf_hub_download(
         repo_id=DATASET_REPO,
         repo_type="dataset",
         filename="observatory.db",
         revision=revision,
     )
+    _validate_database(path)
+    global _last_valid_database_path
+    with _database_path_lock:
+        _last_valid_database_path = path
+    return path
 
 
-def _query(sql: str, params: tuple = ()) -> list:
-    path = _database_path(_dataset_revision())
+def _validate_database(path: str) -> None:
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+        result = conn.execute("PRAGMA quick_check").fetchone()
+        if result is None or result[0] != "ok":
+            raise sqlite3.DatabaseError("database quick_check failed")
+        for table, required_columns in REQUIRED_DATABASE_SCHEMA.items():
+            columns = {
+                row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')
+            }
+            if not required_columns.issubset(columns):
+                raise sqlite3.DatabaseError(
+                    f"database is missing required schema for {table}"
+                )
+
+
+def _resolve_database_path() -> str:
+    try:
+        return _database_path(_dataset_revision())
+    except Exception:
+        with _database_path_lock:
+            fallback = _last_valid_database_path
+        if fallback is None:
+            raise
+        _validate_database(fallback)
+        return fallback
+
+
+def _query(path: str, sql: str, params: tuple = ()) -> list:
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
         return [dict(row) for row in conn.execute(sql, params).fetchall()]
@@ -460,9 +503,10 @@ a, a:visited {{
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_timeline(days: int = 3650) -> pd.DataFrame:
+def load_timeline(path: str, days: int = 3650) -> pd.DataFrame:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
     data = _query(
+        path,
         """SELECT date, aliveness_index, smoothed_index, n_docs,
                   anomaly_flag, anomaly_reason
            FROM composite_index
@@ -482,8 +526,9 @@ def load_timeline(days: int = 3650) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_sources() -> pd.DataFrame:
+def load_sources(path: str) -> pd.DataFrame:
     return pd.DataFrame(_query(
+        path,
         """SELECT source, date,
                   CASE WHEN SUM(n_docs) > 0
                        THEN SUM(mean_score * n_docs) / SUM(n_docs)
@@ -504,8 +549,9 @@ def load_sources() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_score() -> float:
+def load_score(path: str) -> float:
     data = _query(
+        path,
         "SELECT smoothed_index FROM composite_index ORDER BY date DESC LIMIT 1"
     )
     if not data:
@@ -514,17 +560,18 @@ def load_score() -> float:
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_total_docs() -> int:
-    data = _query("SELECT value FROM meta WHERE key = 'total_scored_count'")
+def load_total_docs(path: str) -> int:
+    data = _query(path, "SELECT value FROM meta WHERE key = 'total_scored_count'")
     if not data:
         raise RuntimeError("meta.total_scored_count returned no value")
     return int(data[0]["value"])
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS)
-def load_platform_trends() -> pd.DataFrame:
+def load_platform_trends(path: str) -> pd.DataFrame:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
     data = _query(
+        path,
         """SELECT date, source, aliveness_index
            FROM daily_index
            WHERE source IN ('reddit', 'hackernews', 'bluesky', 'youtube', 'fourchan', 'steam')
@@ -913,24 +960,31 @@ def main():
     total_docs = None
 
     try:
-        score = load_score()
+        database_path = _resolve_database_path()
     except Exception as exc:
-        report_load_failure("Current Internet Aliveness Index", exc, critical=True)
+        report_load_failure("Published dataset snapshot", exc, critical=True)
+        database_path = None
 
-    try:
-        tl_df = load_timeline()
-    except Exception as exc:
-        report_load_failure("Historical timeline", exc)
+    if database_path is not None:
+        try:
+            score = load_score(database_path)
+        except Exception as exc:
+            report_load_failure("Current Internet Aliveness Index", exc, critical=True)
 
-    try:
-        src_df = load_sources()
-    except Exception as exc:
-        report_load_failure("Source aliveness scores", exc)
+        try:
+            tl_df = load_timeline(database_path)
+        except Exception as exc:
+            report_load_failure("Historical timeline", exc)
 
-    try:
-        total_docs = load_total_docs()
-    except Exception as exc:
-        report_load_failure("Document count", exc)
+        try:
+            src_df = load_sources(database_path)
+        except Exception as exc:
+            report_load_failure("Source aliveness scores", exc)
+
+        try:
+            total_docs = load_total_docs(database_path)
+        except Exception as exc:
+            report_load_failure("Document count", exc)
 
     # ── Masthead ──────────────────────────────────────────────────────────────
     render_masthead(live=score is not None)
