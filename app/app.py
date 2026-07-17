@@ -37,8 +37,6 @@ except ImportError:
 CACHE_TTL_SECONDS = 300
 DATASET_REPO = "jupiternull/dead-internet-observatory"
 DATASET_API_URL = f"https://huggingface.co/api/datasets/{DATASET_REPO}"
-_last_valid_database_path: Optional[str] = None
-_database_path_lock = threading.Lock()
 
 REQUIRED_DATABASE_SCHEMA = {
     "composite_index": {
@@ -48,6 +46,11 @@ REQUIRED_DATABASE_SCHEMA = {
     "daily_index": {"date", "source", "mean_score", "aliveness_index", "n_docs"},
     "meta": {"key", "value"},
 }
+
+
+@st.cache_resource()
+def _database_path_state() -> dict:
+    return {"last_valid_path": None, "lock": threading.Lock()}
 
 
 def _http_session() -> requests.Session:
@@ -83,9 +86,9 @@ def _database_path(revision: str) -> str:
         revision=revision,
     )
     _validate_database(path)
-    global _last_valid_database_path
-    with _database_path_lock:
-        _last_valid_database_path = path
+    state = _database_path_state()
+    with state["lock"]:
+        state["last_valid_path"] = path
     return path
 
 
@@ -108,8 +111,9 @@ def _resolve_database_path() -> str:
     try:
         return _database_path(_dataset_revision())
     except Exception:
-        with _database_path_lock:
-            fallback = _last_valid_database_path
+        state = _database_path_state()
+        with state["lock"]:
+            fallback = state["last_valid_path"]
         if fallback is None:
             raise
         _validate_database(fallback)
