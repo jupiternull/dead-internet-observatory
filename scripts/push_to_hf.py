@@ -28,14 +28,29 @@ RESTORE_RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
 def is_rate_limit(exc):
-    text = str(exc).lower()
-    return "429" in text or "too many requests" in text
+    seen = set()
+    current = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        if response is not None and response.status_code == 429:
+            return True
+        text = str(current).lower()
+        if "429" in text or "too many requests" in text:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def is_transient_hf_error(exc):
-    response = getattr(exc, "response", None)
-    if response is not None and response.status_code in RESTORE_RETRY_STATUSES:
-        return True
+    seen = set()
+    current = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        if response is not None and response.status_code in RESTORE_RETRY_STATUSES:
+            return True
+        current = current.__cause__ or current.__context__
     return is_rate_limit(exc)
 
 
