@@ -6,7 +6,11 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from huggingface_hub.errors import HfHubHTTPError, RemoteEntryNotFoundError
+from huggingface_hub.errors import (
+    HfHubHTTPError,
+    LocalEntryNotFoundError,
+    RemoteEntryNotFoundError,
+)
 from scripts import push_to_hf
 
 
@@ -70,6 +74,27 @@ class RestoreTests(unittest.TestCase):
             self.assertEqual(download.call_count, 3)
             self.assertEqual(destination.read_bytes(), b"cached state")
             self.assertIn("using cached local state", output.getvalue())
+
+    def test_restore_defers_wrapped_rate_limit_without_local_state(self):
+        rate_limit = HfHubHTTPError(
+            "429 Too Many Requests", response=Mock(status_code=429)
+        )
+        wrapped = LocalEntryNotFoundError("file unavailable")
+        wrapped.__cause__ = rate_limit
+
+        with tempfile.TemporaryDirectory() as data_dir:
+            with (
+                patch.object(push_to_hf, "STATE_FILES", ("observatory.db",)),
+                patch.object(
+                    push_to_hf, "hf_hub_download", side_effect=wrapped
+                ) as download,
+                patch.object(push_to_hf.time, "sleep"),
+                redirect_stdout(StringIO()) as output,
+            ):
+                push_to_hf.restore("owner/dataset", Path(data_dir))
+
+            self.assertEqual(download.call_count, 3)
+            self.assertIn("state file unavailable", output.getvalue())
 
 
 if __name__ == "__main__":
