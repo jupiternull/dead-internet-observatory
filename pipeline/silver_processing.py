@@ -10,12 +10,56 @@ import os
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import yaml
 
 from detection.ai_content_detector import score_dataframe, corpus_summary
 from analytics.aliveness_index import AlivenessIndexEngine
 
 MAX_NEW_DOCS = 6_000
+
+
+def append_scored(gold_path, scored):
+    """Merge the delta without materialising the historical corpus in pandas."""
+    delta = pa.Table.from_pandas(
+        scored.drop_duplicates(subset=["doc_id"], keep="last"), preserve_index=False
+    )
+    if not gold_path.exists():
+        pq.write_table(delta, gold_path)
+        return len(delta)
+
+    temporary_path = gold_path.with_suffix(".tmp.parquet")
+    try:
+        with pq.ParquetFile(gold_path) as previous:
+            schema = pa.unify_schemas(
+                [previous.schema_arrow, delta.schema], promote_options="permissive"
+            ).remove_metadata()
+
+            def align(table):
+                return pa.Table.from_arrays(
+                    [table[field.name].cast(field.type) if field.name in table.column_names
+                     else pa.nulls(len(table), type=field.type) for field in schema],
+                    schema=schema,
+                )
+
+            delta_ids = pa.array(scored["doc_id"].dropna().unique())
+            count = 0
+            with pq.ParquetWriter(temporary_path, schema) as writer:
+                for batch in previous.iter_batches(batch_size=10_000):
+                    table = pa.Table.from_batches([batch])
+                    table = table.filter(pc.invert(
+                        pc.is_in(table["doc_id"], value_set=delta_ids)
+                    ))
+                    writer.write_table(align(table))
+                    count += len(table)
+                writer.write_table(align(delta))
+                count += len(delta)
+        os.replace(temporary_path, gold_path)
+        return count
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 class SilverToGoldPipeline:
@@ -68,8 +112,7 @@ class SilverToGoldPipeline:
                 )
             print(f"[GOLD] Persisted {len(registry_ids):,} registry IDs")
 
-        candidate_ids = silver_df["doc_id"].dropna().unique().tolist()
-        existing_ids = local_existing_ids | registry_ids
+        existing_ids = registry_ids
 
         if existing_ids:
             print(
@@ -80,6 +123,7 @@ class SilverToGoldPipeline:
             print("[GOLD] No prior scored docs found — scoring full silver batch")
 
         new_df = silver_df[~silver_df["doc_id"].isin(existing_ids)].copy()
+        del silver_df, local_existing_ids, existing_ids
         new_df = new_df.drop_duplicates(subset=["doc_id"], keep="last")
         print(f"[GOLD] {len(new_df):,} new docs to score")
 
@@ -93,7 +137,11 @@ class SilverToGoldPipeline:
 
         if len(new_df) > MAX_NEW_DOCS:
             print(f"[GOLD] Capping to {MAX_NEW_DOCS:,} docs (was {len(new_df):,})")
-            new_df = new_df.head(MAX_NEW_DOCS)
+            new_df = new_df.head(MAX_NEW_DOCS).copy()
+
+        # Reload the durable IDs after scoring instead of retaining millions of
+        # Python strings alongside the model and historical gold batches.
+        del registry_ids
 
         # ── Score, with perplexity disabled for common_crawl (too slow) ───────
         orig_perplexity = os.environ.get("ENABLE_PERPLEXITY", "")
@@ -104,6 +152,7 @@ class SilverToGoldPipeline:
 
         cc_only = new_df[cc_mask].copy()
         non_cc  = new_df[~cc_mask].copy()
+        del new_df, cc_mask
 
         scored_parts = []
         if not cc_only.empty:
@@ -126,18 +175,12 @@ class SilverToGoldPipeline:
         print(f"[GOLD] Summary: {summary}")
 
         # ── Append to gold parquet ────────────────────────────────────────────
-        if gold_path.exists():
-            combined = pd.concat(
-                [pd.read_parquet(gold_path), scored],
-                ignore_index=True,
-            )
-        else:
-            combined = scored
+        gold_count = append_scored(gold_path, scored)
+        print(f"[GOLD] ✓ scored.parquet now has {gold_count:,} docs")
 
-        combined = combined.drop_duplicates(subset=["doc_id"], keep="last")
-        combined.to_parquet(gold_path, index=False, engine="pyarrow")
-        print(f"[GOLD] ✓ scored.parquet now has {len(combined):,} docs")
-
+        registry_ids = set(
+            pd.read_parquet(registry_path, columns=["doc_id"])["doc_id"].dropna()
+        )
         registry_ids.update(scored["doc_id"].dropna().unique())
         pd.DataFrame({"doc_id": sorted(registry_ids)}).to_parquet(
             registry_path, index=False, engine="pyarrow"
